@@ -102,7 +102,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         } else {
           const saved = loadMessages();
           if (saved.length === 0) {
-            setMessages([{ role: 'assistant', content: "Hi! I'm your assistant. Ask me anything about your project!" }]);
+            setMessages([{ role: 'assistant', content: "Hey! I'm Lipo 👋 What are you building today?" }]);
           } else {
             setMessages(saved);
           }
@@ -124,7 +124,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [messages, chatEndRef]);
 
   const clearHistory = useCallback(() => {
-    setMessages([{ role: 'assistant', content: "Hi! I'm your assistant. Ask me anything about your project!" }]);
+    setMessages([{ role: 'assistant', content: "Hey! I'm Lipo 👋 What are you building today?" }]);
     saveMessages([]);
     clearOnServer();
   }, []);

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Menu, X, ChevronDown, Sparkles, BookOpen, Beaker, BarChart3, MessageCircle, Send } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { AiAvatar } from '@/components/AiAvatar';
+import HeroCarousel from '@/components/HeroCarousel';
 
 const NAV_ITEMS = [
   { label: 'Features', href: '#features' },
@@ -15,7 +16,7 @@ const NAV_ITEMS = [
 const FEATURES = [
   {
     icon: <Sparkles className="w-6 h-6" />,
-    title: 'AI Mentor Chat',
+    title: 'Lipo AI Chat',
     desc: 'Get step-by-step guidance on wiring, code, citations, and paper structure tailored to your project.',
   },
   {
@@ -59,8 +60,9 @@ export default function HomePage() {
 
   // Chat panel state
   const [chatOpen, setChatOpen] = useState(false);
+  const [showGreeting, setShowGreeting] = useState(true);
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([
-    { role: 'assistant', content: "Hi! 👋 I'm your assistant. Ask me anything about your project!" },
+    { role: 'assistant', content: "Hey! I'm Lipo 👋 What are you building today?" },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
@@ -123,7 +125,7 @@ export default function HomePage() {
       <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-[#e2e8f0]">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <button onClick={() => router.push('/')} className="flex items-center gap-1.5">
-            <Logo size={28} textSize="text-lg" />
+            <Logo size={36} textSize="text-xl" />
           </button>
 
           <div className="hidden md:flex items-center gap-6">
@@ -136,8 +138,8 @@ export default function HomePage() {
 
           <div className="hidden md:flex items-center gap-3">
             {signedIn ? (
-              <button onClick={() => router.push('/auth')} className="text-sm font-bold text-white bg-[#ec4899] px-5 py-2 rounded-lg hover:bg-[#db2777] transition shadow-sm">
-                Get Started
+              <button onClick={() => router.push('/dashboard')} className="text-sm font-bold text-white bg-[#ec4899] px-5 py-2 rounded-lg hover:bg-[#db2777] transition shadow-sm">
+                Dashboard
               </button>
             ) : (
               <>
@@ -165,7 +167,7 @@ export default function HomePage() {
             ))}
             <hr className="border-[#e2e8f0]" />
             {signedIn ? (
-              <button onClick={() => router.push('/auth')} className="block w-full text-center text-sm font-bold text-white bg-[#ec4899] py-2.5 rounded-lg">Get Started</button>
+              <button onClick={() => router.push('/dashboard')} className="block w-full text-center text-sm font-bold text-white bg-[#ec4899] py-2.5 rounded-lg">Dashboard</button>
             ) : (
               <>
                 <button onClick={() => router.push('/auth')} className="block w-full text-center text-sm font-semibold text-[#64748b] py-2">Sign In</button>
@@ -188,8 +190,8 @@ export default function HomePage() {
               AI-powered mentor for students, makers, and anyone building a project. From choosing a topic to wiring sensors to formatting citations — all in one place.
             </p>
             <div className="flex flex-wrap gap-3 justify-center md:justify-start">
-              <button onClick={() => router.push('/auth')} className="px-8 py-3 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition shadow-sm">
-                Get Started Free
+              <button onClick={() => router.push(signedIn ? '/dashboard' : '/auth')} className="px-8 py-3 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition shadow-sm">
+                {signedIn ? 'Dashboard' : 'Get Started Free'}
               </button>
               <a href="#features" className="px-8 py-3 rounded-lg text-sm font-semibold text-[#64748b] border border-[#e2e8f0] hover:border-[#fbcfe8] hover:text-[#db2777] transition">
                 Learn More
@@ -197,8 +199,8 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex-1 max-w-md">
-            <div className="aspect-square rounded-2xl bg-white flex items-center justify-center shadow-sm border border-[#e2e8f0]">
-              <Sparkles className="w-24 h-24 text-[#ec4899]/20" />
+            <div className="aspect-square w-full">
+              <HeroCarousel />
             </div>
           </div>
         </div>
@@ -255,7 +257,7 @@ export default function HomePage() {
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { icon: '💬', title: 'AI Mentor Chat', href: '/chat' },
+              { icon: '💬', title: 'Lipo AI Chat', href: '/chat' },
               { icon: '🧪', title: 'Sandbox Wizard', href: '/sandbox' },
               { icon: '📝', title: 'Citation Generator', href: '/citation' },
               { icon: '📚', title: 'Research Hub', href: '/hub' },
@@ -302,13 +304,21 @@ export default function HomePage() {
         <div className="max-w-3xl mx-auto px-4 text-center text-white">
           <h2 className="text-3xl font-bold mb-4">Ready to Start Your Capstone?</h2>
           <p className="text-white/60 mb-8">Join students and makers using AI to build better projects.</p>
-          <button onClick={() => router.push('/auth')} className="px-10 py-3 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition shadow-sm">
-            Get Started Free
+          <button onClick={() => router.push(signedIn ? '/dashboard' : '/auth')} className="px-10 py-3 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition shadow-sm">
+            {signedIn ? 'Dashboard' : 'Get Started Free'}
           </button>
         </div>
       </section>
 
       {/* ─── Floating Chat Button ─── */}
+      {!chatOpen && showGreeting && (
+        <div className="fixed bottom-9 right-[5.5rem] z-50 flex items-center gap-2 bg-white border border-[#e2e8f0] rounded-xl px-4 py-2 shadow-md text-sm text-[#0f172a]">
+          <span className="whitespace-nowrap">Hey! I'm Lipo — your project sidekick. Need a hand?</span>
+          <button onClick={() => setShowGreeting(false)} className="p-0.5 rounded text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition shrink-0">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
       <button
         onClick={() => setChatOpen(!chatOpen)}
         className="fixed bottom-6 right-6 w-16 h-16 rounded-full bg-white text-[#ec4899] flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition z-50 border border-[#e2e8f0]"
@@ -324,7 +334,7 @@ export default function HomePage() {
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#e2e8f0]">
           <div className="flex items-center gap-2">
             <AiAvatar size={32} />
-            <h3 className="font-semibold text-sm text-[#0f172a]">AI Mentor</h3>
+            <h3 className="font-semibold text-sm text-[#0f172a]">Lipo</h3>
           </div>
           <button onClick={() => setChatOpen(false)} className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100">
             <X className="w-4 h-4" />
@@ -374,7 +384,7 @@ export default function HomePage() {
       {/* ─── Footer ─── */}
       <footer className="py-10 border-t border-[#e2e8f0] bg-white">
         <div className="max-w-6xl mx-auto px-4 text-center text-sm text-[#64748b]">
-          <Logo size={22} textSize="text-sm" />
+          <Logo size={28} textSize="text-base" />
           <p className="mt-1">Your project companion — from idea to build, for school, competition, or passion.</p>
         </div>
       </footer>

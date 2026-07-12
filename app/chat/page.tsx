@@ -221,8 +221,8 @@ export default function ChatPage() {
               <MessageSquare className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-lg font-bold bg-gradient-to-r from-[#ec4899] to-[#db2777] bg-clip-text text-transparent">Capstone AI Mentor</h1>
-              <p className="text-xs text-gray-500">Your AI project mentor</p>
+              <h1 className="text-lg font-bold bg-gradient-to-r from-[#ec4899] to-[#db2777] bg-clip-text text-transparent">Lipo</h1>
+              <p className="text-xs text-gray-500">Your AI project sidekick</p>
             </div>
           </div>
           <div className="flex gap-2">

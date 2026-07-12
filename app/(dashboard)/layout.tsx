@@ -33,7 +33,7 @@ const NAV_ICONS: Record<string, React.ReactNode> = {
 const features = [
   { id: 'dashboard', label: 'Dashboard', href: '/dashboard', desc: 'Home' },
   { id: 'projects', label: 'My Projects', href: '/projects', desc: 'Saved prototypes' },
-  { id: 'examples', label: 'Project Ideas', href: '/examples', desc: 'Capstone examples' },
+  { id: 'examples', label: 'Project Ideas', href: '/examples', desc: 'Pre-built projects' },
   { id: 'sandbox', label: 'Sandbox', href: '/sandbox', desc: 'Hardware prototyping wizard' },
   { id: 'research', label: 'Research', href: '/research', desc: 'Summarize papers & cite' },
   { id: 'citation', label: 'Citation', href: '/citation', desc: 'APA / MLA / IEEE / AMA generator' },
@@ -54,15 +54,20 @@ function ProfileMenu() {
   }, []);
 
   const initial = user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || "?";
+  const avatar = typeof window !== 'undefined' ? localStorage.getItem('capstone_avatar') : null;
 
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="w-8 h-8 rounded-full bg-[#ec4899] text-white text-sm font-bold flex items-center justify-center hover:shadow-md hover:scale-105 transition shadow-sm"
+        className="w-8 h-8 rounded-full bg-[#ec4899] text-white text-sm font-bold flex items-center justify-center hover:shadow-md hover:scale-105 transition shadow-sm overflow-hidden"
         aria-label="Profile menu"
       >
-        {initial}
+        {avatar ? (
+          <img src={avatar} alt="" className="w-full h-full object-cover" />
+        ) : (
+          initial
+        )}
       </button>
 
       {open && (
@@ -111,7 +116,7 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
       <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-60 bg-white border-r border-[#e2e8f0] flex flex-col overflow-hidden shrink-0 transition-transform duration-200`}>
         <div className="p-4 border-b border-[#e2e8f0] flex items-center justify-between">
           <Link href="/" className="hover:opacity-80 transition">
-            <Logo size={26} textSize="text-base" />
+            <Logo size={32} textSize="text-lg" />
             <p className="text-[10px] text-[#64748b] mt-0.5 ml-0.5">Project Hub</p>
           </Link>
           <button onClick={onClose} aria-label="Close sidebar" className="md:hidden p-1 text-[#64748b] hover:text-[#0f172a]"><X className="w-4 h-4" /></button>
@@ -164,6 +169,7 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
 function ChatPanel() {
   const { chatOpen, setChatOpen, messages, sendMessage, loading, input, setInput, chatEndRef, clearHistory } = useChat();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showGreeting, setShowGreeting] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -176,6 +182,14 @@ function ChatPanel() {
 
   return (
     <>
+      {!chatOpen && showGreeting && (
+        <div className="fixed bottom-9 right-[5.5rem] z-50 flex items-center gap-2 bg-white border border-[#e2e8f0] rounded-xl px-4 py-2 shadow-md text-sm text-[#0f172a]">
+          <span className="whitespace-nowrap">Hey! I'm Lipo — your project sidekick. Need a hand?</span>
+          <button onClick={() => setShowGreeting(false)} className="p-0.5 rounded text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition shrink-0">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
       <button onClick={() => setChatOpen(!chatOpen)}
         aria-label={chatOpen ? "Close chat" : "Open chat"}
         className="fixed bottom-6 right-6 w-16 h-16 rounded-full bg-white text-[#ec4899] flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition z-50 border border-[#e2e8f0]"
@@ -189,7 +203,7 @@ function ChatPanel() {
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#e2e8f0]">
           <div className="flex items-center gap-2">
             <AiAvatar size={28} />
-            <h3 className="font-semibold text-sm text-[#0f172a]">AI Mentor</h3>
+            <h3 className="font-semibold text-sm text-[#0f172a]">Lipo</h3>
           </div>
           <div className="flex items-center gap-1">
             <div className="relative" ref={menuRef}>

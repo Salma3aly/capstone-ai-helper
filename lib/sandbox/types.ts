@@ -165,4 +165,8 @@ export interface SandboxProject {
   code: CodeGeneration | null;
   createdAt: number;
   updatedAt: number;
+  hardwareBoard?: string;
+  hardwareSensors?: string[];
+  sensorNames?: Record<string, string>;
+  hardwareWiring?: WiringItem[];
 }

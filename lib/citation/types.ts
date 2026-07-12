@@ -7,7 +7,6 @@ export interface Source {
   authors: string[];
   publisher?: string;
   pubDate?: string;
-  accessDate: string;
   city?: string;
   volume?: string;
   number?: string;

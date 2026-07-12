@@ -11,10 +11,14 @@ export interface User {
   name: string;
   email: string;
   password: string;
+  grade?: string;
+  phone?: string;
+  university?: string;
+  avatar?: string;
   createdAt: string;
 }
 
-function readDb(): User[] {
+export function readDb(): User[] {
   try {
     if (!fs.existsSync(DB_PATH)) return [];
     return JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
@@ -33,7 +37,10 @@ export function findUserByEmail(email: string): User | undefined {
   return readDb().find((u) => u.email === email);
 }
 
-export async function createUser(name: string, email: string, password: string): Promise<User> {
+export async function createUser(
+  name: string, email: string, password: string,
+  extra?: { grade?: string; phone?: string; university?: string }
+): Promise<User> {
   const users = readDb();
   const hashed = await bcrypt.hash(password, 10);
   const user: User = {
@@ -41,11 +48,23 @@ export async function createUser(name: string, email: string, password: string):
     name,
     email,
     password: hashed,
+    grade: extra?.grade,
+    phone: extra?.phone,
+    university: extra?.university,
     createdAt: new Date().toISOString(),
   };
   users.push(user);
   writeDb(users);
   return user;
+}
+
+export function updateUser(id: string, updates: Partial<Omit<User, "id" | "password" | "createdAt">>): User | null {
+  const users = readDb();
+  const idx = users.findIndex((u) => u.id === id);
+  if (idx === -1) return null;
+  users[idx] = { ...users[idx], ...updates };
+  writeDb(users);
+  return users[idx];
 }
 
 export function signToken(user: Omit<User, "password">): string {

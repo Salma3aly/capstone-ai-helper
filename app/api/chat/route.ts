@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("Chat API Error:", error);
     const msg = error instanceof Error && error.message.includes("429 TPD")
-      ? "The AI service has reached its daily token limit. Please try again tomorrow or add more API keys."
+      ? `The AI service has reached its daily token limit (${(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "").split(",").filter(Boolean).length} key(s) configured). Please try again tomorrow or add more API keys.`
       : error instanceof Error && (error.message.includes("429") || error.message.includes("rate_limit"))
         ? "AI service is busy. Please wait a moment and try again."
         : "Failed to process chat request. Please try again.";

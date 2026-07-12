@@ -14,7 +14,7 @@ function detectLanguage(board: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { idea, boardId, sensorIds }: { idea: string; boardId: string; sensorIds: string[] } =
+    const { idea, boardId, sensorIds, sensorDisplayNames }: { idea: string; boardId: string; sensorIds: string[]; sensorDisplayNames?: string[] } =
       await req.json();
 
     if (!idea || !boardId || !sensorIds || sensorIds.length === 0) {
@@ -26,9 +26,11 @@ export async function POST(req: Request) {
     if (!boardComp) return NextResponse.json({ error: "Invalid board selection" }, { status: 400 });
     const boardName = boardComp.name;
 
-    const sensorNames = sensorIds
-      .map((id) => COMPONENTS.find((c) => c.id === id)?.name)
-      .filter((n): n is string => !!n);
+    // Use explicit display names if provided, otherwise fall back to catalog lookup
+    const sensorNames = sensorDisplayNames && sensorDisplayNames.length === sensorIds.length
+      ? sensorDisplayNames
+      : sensorIds
+          .map((id) => COMPONENTS.find((c) => c.id === id)?.name ?? id);
 
     // Run electrical validation
     const issues = validateBuild(boardId, sensorIds);
@@ -47,8 +49,9 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("Generate API Error:", error);
+    const keyCount = (process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "").split(",").filter(Boolean).length;
     const msg = error instanceof Error && error.message.includes("429 TPD")
-      ? "The AI service has reached its daily token limit. Please try again tomorrow or add more API keys."
+      ? `The AI service has reached its daily token limit (${keyCount} key(s) configured). Please try again tomorrow or add more API keys.`
       : error instanceof Error && error.message.includes("429")
         ? "AI service is busy. Please wait a moment and try again."
         : "Could not generate output. Please try again.";

@@ -12,8 +12,8 @@ const tools = [
   },
   {
     id: 'examples', label: 'Project Ideas', href: '/examples',
-    desc: 'Browse 15+ ready-made project ideas',
-    features: ['Difficulty tiers', 'Component lists', 'Pre-fill Sandbox'],
+    desc: '8+ complete pre-built projects with wiring & code',
+    features: ['Board & sensors', 'Full wiring tables', 'Ready-to-run code'],
   },
   {
     id: 'research', label: 'Research Assistant', href: '/research',
@@ -72,7 +72,7 @@ export default function DashboardPage() {
             { icon: <Folder className="w-4 h-4" />, label: 'Saved Projects', value: projectCount, color: '#ec4899' },
             { icon: <Wrench className="w-4 h-4" />, label: 'Completed', value: completedCount, color: '#3b82f6' },
             { icon: <BookOpen className="w-4 h-4" />, label: 'In Progress', value: projectCount - completedCount, color: '#a855f7' },
-            { icon: <Trophy className="w-4 h-4" />, label: 'Wiring Sets', value: projects.reduce((s, p) => s + (p.wiring?.length || 0), 0), color: '#f59e0b' },
+            { icon: <Trophy className="w-4 h-4" />, label: 'Wiring Sets', value: projects.reduce((s, p) => s + ((p as any).connections?.length || p.wiring?.length || 0), 0), color: '#f59e0b' },
           ].map((stat) => (
             <div key={stat.label} className="bg-white border border-[#e2e8f0] rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -117,7 +117,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="min-w-0">
                   <h3 className="font-semibold text-sm text-[#0f172a]">Browse Project Ideas</h3>
-                  <p className="text-xs text-[#64748b] mt-0.5">Not sure what to build? Get inspired.</p>
+                  <p className="text-xs text-[#64748b] mt-0.5">Complete pre-built projects with wiring and code ready to go.</p>
                 </div>
               </div>
             </Link>

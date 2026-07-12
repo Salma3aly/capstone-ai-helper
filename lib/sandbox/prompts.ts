@@ -21,6 +21,11 @@ Rules:
 - Add inline comments on every meaningful line explaining what it does
 - Make the code copy-paste ready with no placeholders
 
+WIRING DIAGRAM REQUIREMENTS:
+1. You MUST generate a wiring entry in the "wiring" array for EVERY single selected sensor/component: ${sensors.join(", ")}. Do not skip any of them.
+2. In each entry, the "component" field MUST exactly match the name of the sensor as listed above (e.g., use exactly "${sensors[0]}" or "${sensors[1] || ""}"). Do not add, omit, or modify any words in the name.
+3. Detail all connections between the sensor pins (e.g. VCC, GND, data/signal pins) and the microcontroller board's pins (e.g. "VCC → 5V", "GND → GND", "AO → A0").
+
 DATA LOGGING REQUIREMENTS (always include):
 1. Read each sensor at a configurable interval (default 1000ms)
 2. Timestamp each reading using millis() (or RTC if available)

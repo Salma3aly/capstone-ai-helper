@@ -115,9 +115,11 @@ function sensorGrid(sName: string, index: number): { col: number; row: number; p
 
 /** Parse a pin label to figure out which Arduino pin category+index it maps to */
 function resolveArduinoPin(label: string): Point | null {
-  const clean = label.replace(/pin\s*/i, "").trim();
+  let clean = label.replace(/pin\s*/i, "").trim().toUpperCase();
+  if (clean === "AO") clean = "A0";
+
   // Check digital
-  const digIdx = DIG_PINS.indexOf(clean);
+  const digIdx = DIG_PINS.findIndex((p) => p.toUpperCase() === clean);
   if (digIdx !== -1) return arPin("dig", digIdx);
   // Check by value match
   if (clean === "AREF") return arPin("dig", 0);
@@ -130,14 +132,14 @@ function resolveArduinoPin(label: string): Point | null {
     }
   }
   if (clean === "TX" || clean === "RX") {
-    const idx = DIG_PINS.indexOf(clean);
+    const idx = DIG_PINS.findIndex((p) => p.toUpperCase() === clean);
     if (idx !== -1) return arPin("dig", idx);
   }
   // Power
-  const pwrIdx = PWR_PINS.findIndex((p) => p === clean || p.startsWith(clean));
+  const pwrIdx = PWR_PINS.findIndex((p) => p.toUpperCase() === clean || p.toUpperCase().startsWith(clean));
   if (pwrIdx !== -1) return arPin("pwr", pwrIdx);
   // Analog
-  const anaIdx = ANA_PINS.indexOf(clean);
+  const anaIdx = ANA_PINS.findIndex((p) => p.toUpperCase() === clean);
   if (anaIdx !== -1) return arPin("ana", anaIdx);
   return null;
 }
@@ -159,8 +161,15 @@ export function BreadboardSimulator({
       from: Point; to: Point; color: string;
     }[] = [];
 
+    const cleanComp = (name: string) =>
+      name.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/sensor|module|shield|board/g, "");
+
     wiring.forEach((item) => {
-      const sGrid = sensorGrids.find((sg) => sg.name === item.component);
+      const targetClean = cleanComp(item.component);
+      const sGrid = sensorGrids.find((sg) => {
+        const sgClean = cleanComp(sg.name);
+        return sgClean.includes(targetClean) || targetClean.includes(sgClean);
+      });
       if (!sGrid) return;
 
       item.connections.forEach((connStr, cIdx) => {
@@ -169,9 +178,12 @@ export function BreadboardSimulator({
         const dstLabel = parts[1] || "";
 
         // Find source pin (breadboard hole)
-        const sPin = sGrid.grid.pins.find((p) =>
-          p.label.toLowerCase().includes(srcLabel.toLowerCase()) || srcLabel.toLowerCase().includes(p.label.toLowerCase())
-        );
+        const normalizePin = (s: string) => s.toLowerCase().replace(/0/g, "o").trim();
+        const normSrc = normalizePin(srcLabel);
+        const sPin = sGrid.grid.pins.find((p) => {
+          const normP = normalizePin(p.label);
+          return normP.includes(normSrc) || normSrc.includes(normP);
+        });
         const fromPt = sPin ? bh(sPin.col, sPin.row) : bh(sGrid.grid.col + 1, sGrid.grid.row + 2);
 
         // Find destination (Arduino pin)

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
-import { Copy, Check, ExternalLink, Plus, X, Sparkles, Loader2, Download, FileText } from "lucide-react";
+import { Copy, Check, ExternalLink, Plus, X, Sparkles, Loader2, Download, FileText, Quote } from "lucide-react";
 import { formatAllCitations } from "@/lib/citation/styles";
 import type { CitationStyle, Source } from "@/lib/citation/types";
 
@@ -12,20 +12,21 @@ const STYLES: { id: CitationStyle; label: string; desc: string }[] = [
 ];
 
 export default function CitationPage() {
-  const today = new Date().toISOString().split("T")[0];
-
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [siteName, setSiteName] = useState("");
   const [authors, setAuthors] = useState<string[]>([""]);
   const [pubDate, setPubDate] = useState("");
-  const [accessDate, setAccessDate] = useState(today);
   const [copied, setCopied] = useState<CitationStyle | null>(null);
+  const [showCitations, setShowCitations] = useState(false);
 
   // Scraping states
   const [scraping, setScraping] = useState(false);
   const [scrapeMsg, setScrapeMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(true);
+  const [pdfUploading, setPdfUploading] = useState(false);
+  const [pdfMsg, setPdfMsg] = useState("");
+  const [uploadedFileName, setUploadedFileName] = useState("");
 
   const source: Source = useMemo(
     () => ({
@@ -34,9 +35,8 @@ export default function CitationPage() {
       siteName,
       authors: authors.filter((a) => a.trim()),
       pubDate: pubDate || undefined,
-      accessDate,
     }),
-    [url, title, siteName, authors, pubDate, accessDate]
+    [url, title, siteName, authors, pubDate]
   );
 
   const citations = useMemo(() => formatAllCitations(source), [source]);
@@ -71,8 +71,7 @@ export default function CitationPage() {
   author = {${source.authors.length > 0 ? source.authors.join(" and ") : "Anonymous"}},
   title = {${title}},
   year = {${pubDate ? pubDate.split("-")[0] : "n.d."}},
-  howpublished = {${url}},
-  note = {Accessed: ${accessDate}}
+  howpublished = {${url}}
 }`;
     const blob = new Blob([bibEntry], { type: "text/plain" });
     const blobUrl = URL.createObjectURL(blob);
@@ -84,7 +83,7 @@ export default function CitationPage() {
   };
 
   const copyFormatted = async (style: CitationStyle) => {
-    const text = `${citations[style]}\n\n— Retrieved from ${url}`;
+    const text = `${citations[style]}`;
     await navigator.clipboard.writeText(text);
     setCopied(style);
     setTimeout(() => setCopied(null), 2000);
@@ -95,15 +94,15 @@ export default function CitationPage() {
     setScraping(true);
     setScrapeMsg("Connecting to site and fetching metadata...");
     setIsSuccess(true);
+    setShowCitations(false);
     try {
       const res = await fetch("/api/citation/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
-      if (!res.ok) throw new Error("Fetch failed");
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (!res.ok || data.error) throw new Error(data.error || "Autofill failed");
 
       if (data.title) setTitle(data.title);
       if (data.siteName) setSiteName(data.siteName);
@@ -116,13 +115,54 @@ export default function CitationPage() {
 
       setScrapeMsg("Successfully scraped page details!");
       setTimeout(() => setScrapeMsg(""), 4000);
-    } catch (err) {
+    } catch (err: any) {
       setIsSuccess(false);
-      setScrapeMsg("Autofill failed. Please fill in coordinates manually.");
+      setScrapeMsg(err.message || "Autofill failed. Please fill in details manually.");
       setTimeout(() => setScrapeMsg(""), 4000);
     } finally {
       setScraping(false);
     }
+  };
+
+  const handlePdfUpload = async (file: File) => {
+    if (!file) return;
+    setPdfUploading(true);
+    setPdfMsg("Extracting citation data from PDF...");
+    setUploadedFileName("");
+    setShowCitations(false);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/citation/extract-pdf", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "PDF processing failed");
+      }
+      const data = await res.json();
+      if (data.title) setTitle(data.title);
+      if (data.siteName) setSiteName(data.siteName);
+      if (data.authors && data.authors.length > 0) {
+        setAuthors(data.authors);
+      } else {
+        setAuthors([""]);
+      }
+      if (data.pubDate) setPubDate(data.pubDate);
+      setPdfMsg("PDF processed — fields populated from extracted data");
+      setUploadedFileName(file.name);
+    } catch (err: any) {
+      setPdfMsg(err.message || "Failed to process PDF");
+      setUploadedFileName("");
+    } finally {
+      setPdfUploading(false);
+    }
+  };
+
+  const handleCite = () => {
+    if (!title && !url) return;
+    setShowCitations(true);
   };
 
   return (
@@ -163,6 +203,51 @@ export default function CitationPage() {
               {scrapeMsg && (
                 <p className={`text-[10px] font-medium mt-1.5 ${isSuccess ? "text-green-600" : "text-amber-600"}`}>
                   {scrapeMsg}
+                </p>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <hr className="flex-1 border-gray-200" />
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">or upload a PDF</span>
+              <hr className="flex-1 border-gray-200" />
+            </div>
+
+            {/* PDF Upload */}
+            <div>
+              <label className="text-xs font-semibold text-gray-500">Upload Research Paper (PDF)</label>
+              <div className="mt-1">
+                <label className={`flex flex-col items-center justify-center w-full border-2 border-dashed rounded-lg cursor-pointer transition-colors ${pdfUploading ? "border-gray-200 bg-gray-50" : "border-gray-300 bg-white hover:bg-gray-50 hover:border-[#ec4899]"} ${uploadedFileName ? "border-green-300 bg-green-50" : ""}`}>
+                  <div className="flex flex-col items-center justify-center py-5 px-4">
+                    {pdfUploading ? (
+                      <Loader2 className="w-6 h-6 text-[#ec4899] animate-spin mb-2" />
+                    ) : uploadedFileName ? (
+                      <FileText className="w-6 h-6 text-green-500 mb-2" />
+                    ) : (
+                      <FileText className="w-6 h-6 text-gray-400 mb-2" />
+                    )}
+                    <p className={`text-xs font-medium ${uploadedFileName ? "text-green-700" : "text-gray-500"}`}>
+                      {pdfUploading ? "Processing PDF..." : uploadedFileName || "Click to upload or drag & drop"}
+                    </p>
+                    {!uploadedFileName && <p className="text-[10px] text-gray-400 mt-0.5">PDF files only</p>}
+                  </div>
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                    disabled={pdfUploading}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handlePdfUpload(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              {pdfMsg && (
+                <p className={`text-[10px] font-medium mt-1.5 ${pdfMsg.includes("populated") || pdfMsg.includes("processed") ? "text-green-600" : "text-amber-600"}`}>
+                  {pdfMsg}
                 </p>
               )}
             </div>
@@ -215,26 +300,23 @@ export default function CitationPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-500">Publication Date</label>
-                <input
-                  type="date"
-                  value={pubDate}
-                  onChange={(e) => setPubDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500">Access Date</label>
-                <input
-                  type="date"
-                  value={accessDate}
-                  onChange={(e) => setAccessDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black"
-                />
-              </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500">Publication Date</label>
+              <input
+                type="date"
+                value={pubDate}
+                onChange={(e) => setPubDate(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black"
+              />
             </div>
+
+            <button
+              onClick={handleCite}
+              disabled={!url || !title}
+              className="w-full bg-[#ec4899] hover:bg-[#db2777] disabled:bg-gray-300 text-white font-bold py-3 rounded-lg text-sm transition shadow-sm flex items-center justify-center gap-2"
+            >
+              <Quote className="w-4 h-4" /> Cite
+            </button>
           </div>
 
           {/* Output */}
@@ -244,14 +326,14 @@ export default function CitationPage() {
               <div className="flex gap-1.5">
                 <button
                   onClick={downloadBib}
-                  disabled={!url || !title}
+              disabled={!title && !url}
                   className="flex items-center gap-1 text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <Download className="w-3 h-3" /> .bib
                 </button>
                 <button
                   onClick={copyAll}
-                  disabled={!url || !title}
+                  disabled={!showCitations}
                   className="flex items-center gap-1 text-xs bg-[#ec4899] text-white px-3 py-1.5 rounded-lg hover:bg-[#db2777] disabled:bg-gray-300 transition-colors shadow-sm"
                 >
                   {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -260,11 +342,11 @@ export default function CitationPage() {
               </div>
             </div>
 
-            {!url || !title ? (
+            {!showCitations ? (
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center h-full min-h-[300px] flex flex-col justify-center items-center">
                 <span className="text-2xl mb-2">📚</span>
-                <p className="text-sm text-gray-400">Fill in the URL and click Autofill (or type details manually)</p>
-                <p className="text-[10px] text-gray-400 mt-1">citations compile automatically in real-time</p>
+                <p className="text-sm text-gray-400">Fill in the source details and click <strong>Cite</strong></p>
+                <p className="text-[10px] text-gray-400 mt-1">You can Autofill from a URL or upload a PDF</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -277,22 +359,10 @@ export default function CitationPage() {
                       </div>
                       <div className="flex gap-1">
                         <button
-                          onClick={() => copyFormatted(style.id)}
-                          className="flex items-center gap-1 text-[10px] bg-white border border-gray-200 px-2 py-1 rounded hover:bg-gray-50 transition-colors"
-                          title="Copy with source link for Word/Google Docs"
-                        >
-                          {copied === style.id ? (
-                            <Check className="w-3 h-3 text-green-500" />
-                          ) : (
-                            <FileText className="w-3 h-3" />
-                          )}
-                          {copied === style.id ? "Copied" : "Copy formatted"}
-                        </button>
-                        <button
                           onClick={() => copy(style.id)}
                           className="flex items-center gap-1 text-[10px] bg-white border border-gray-200 px-2 py-1 rounded hover:bg-gray-50 transition-colors"
                         >
-                          <Copy className="w-3 h-3" /> Plain
+                          <Copy className="w-3 h-3" /> Copy
                         </button>
                       </div>
                     </div>

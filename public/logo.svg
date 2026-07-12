@@ -1,0 +1,45 @@
+<svg width="160" height="64" viewBox="0 0 160 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="160" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#ec4899" />
+      <stop offset="50%" stopColor="#a855f7" />
+      <stop offset="100%" stopColor="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0" y1="0" x2="100" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#ec4899" />
+      <stop offset="50%" stopColor="#a855f7" />
+      <stop offset="100%" stopColor="#3b82f6" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stopColor="#a855f7" stopOpacity="0.15" />
+      <stop offset="100%" stopColor="#a855f7" stopOpacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Icon -->
+  <g transform="translate(0, 0)">
+    <circle cx="32" cy="32" r="28" fill="url(#glow)" />
+    <path d="M32 4 L54 22 L32 58 L10 22 Z" fill="url(#g)" opacity="0.92" />
+    <path d="M32 4 L10 22 L32 36 Z" fill="white" opacity="0.08" />
+    <path d="M32 4 L54 22 L32 36 Z" fill="white" opacity="0.14" />
+    <path d="M32 4 L54 22" stroke="white" strokeWidth="1.5" opacity="0.3" />
+    <path d="M32 4 L10 22" stroke="white" strokeWidth="1.5" opacity="0.2" />
+    <g transform="translate(32, 6)">
+      <path d="M0 -6 L1.5 -2 L6 0 L1.5 2 L0 6 L-1.5 2 L-6 0 L-1.5 -2 Z" fill="white" opacity="0.9" />
+    </g>
+    <path d="M18 30 L22 26 L30 26 L34 22" stroke="white" strokeWidth="1.2" opacity="0.4" strokeLinecap="round" fill="none" />
+    <path d="M46 30 L42 26 L34 26 L30 22" stroke="white" strokeWidth="1.2" opacity="0.3" strokeLinecap="round" fill="none" />
+    <path d="M22 34 L28 40 L40 40 L44 34" stroke="white" strokeWidth="1.2" opacity="0.35" strokeLinecap="round" fill="none" />
+    <circle cx="18" cy="30" r="2" fill="white" opacity="0.6" />
+    <circle cx="46" cy="30" r="2" fill="white" opacity="0.5" />
+    <circle cx="22" cy="34" r="1.5" fill="white" opacity="0.5" />
+    <circle cx="44" cy="34" r="1.5" fill="white" opacity="0.5" />
+    <circle cx="34" cy="22" r="1.5" fill="white" opacity="0.6" />
+    <path d="M32 58 Q32 62 36 62" stroke="white" strokeWidth="1.5" opacity="0.35" strokeLinecap="round" fill="none" />
+    <circle cx="36" cy="62" r="1.5" fill="#ec4899" opacity="0.7" />
+    <circle cx="32" cy="36" r="2.5" fill="white" opacity="0.3" />
+  </g>
+
+  <!-- Text -->
+  <text x="76" y="42" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="url(#textGrad)">Capstone</text>
+</svg>

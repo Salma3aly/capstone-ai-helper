@@ -6,44 +6,67 @@ interface ChatMessage {
 }
 
 // ─── Multi-key management ──────────────────────────────────────────────────
-// Supports GROQ_API_KEYS (comma-separated) or single GROQ_API_KEY for
-// backward compatibility. Keys rotate round-robin; exhausted keys (TPD) are
-// skipped until all are exhausted, then the set resets.
+// Reads GROQ_API_KEYS (comma-separated) or GROQ_API_KEY from env on every
+// call, so adding keys to .env.local takes effect immediately (no restart).
+// Keys rotate round-robin; exhausted keys (TPD) are skipped.
 
-const KEY_RING = (() => {
+function getKeyRing(): string[] {
   const raw = process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "";
   if (!raw) throw new Error("GROQ_API_KEY or GROQ_API_KEYS env var is required");
   return raw.split(",").map((k) => k.trim()).filter(Boolean);
-})();
+}
 
 const KEY_STATE = {
   exhausted: new Set<number>(),
   index: 0,
   lastReset: Date.now(),
+  lastKeyCount: 0,
 };
 
 const RESET_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 function getKey(): string {
+  const ring = getKeyRing();
+
+  // If the key count changed (new keys added), reset exhausted state
+  if (ring.length !== KEY_STATE.lastKeyCount) {
+    KEY_STATE.exhausted.clear();
+    KEY_STATE.index = 0;
+    KEY_STATE.lastKeyCount = ring.length;
+    console.warn(`Groq key ring changed (${ring.length} keys), resetting rotation`);
+  }
+
   const now = Date.now();
   if (now - KEY_STATE.lastReset > RESET_INTERVAL_MS) {
     KEY_STATE.exhausted.clear();
     KEY_STATE.lastReset = now;
     console.warn("Cleared exhausted Groq API key cache (hourly reset)");
   }
-  const available = KEY_RING.filter((_, i) => !KEY_STATE.exhausted.has(i));
+
+  const available = ring.filter((_, i) => !KEY_STATE.exhausted.has(i));
   if (available.length === 0) {
     KEY_STATE.exhausted.clear();
     console.warn("All Groq API keys exhausted, resetting for next attempt");
   }
-  KEY_STATE.index = (KEY_STATE.index + 1) % KEY_RING.length;
-  return KEY_RING[KEY_STATE.index];
+
+  // Round-robin through keys, skipping exhausted ones
+  for (let attempt = 0; attempt < ring.length; attempt++) {
+    KEY_STATE.index = (KEY_STATE.index + 1) % ring.length;
+    if (!KEY_STATE.exhausted.has(KEY_STATE.index)) {
+      return ring[KEY_STATE.index];
+    }
+  }
+
+  // Fallback — all exhausted, try the current one anyway
+  KEY_STATE.index = (KEY_STATE.index + 1) % ring.length;
+  return ring[KEY_STATE.index];
 }
 
 function markKeyExhausted() {
   KEY_STATE.exhausted.add(KEY_STATE.index);
-  const remaining = KEY_RING.filter((_, i) => !KEY_STATE.exhausted.has(i)).length;
-  console.warn(`Groq API key ${KEY_STATE.index + 1}/${KEY_RING.length} exhausted (TPD), ${remaining} keys remaining`);
+  const ring = getKeyRing();
+  const remaining = ring.filter((_, i) => !KEY_STATE.exhausted.has(i)).length;
+  console.warn(`Groq API key ${KEY_STATE.index + 1}/${ring.length} exhausted (TPD), ${remaining} keys remaining`);
 }
 
 /** Parse 429 body to determine if it's TPD (hard daily cap) or RPM (can retry) */
@@ -71,9 +94,9 @@ function parse429Error(body: string): { type: "tpd" | "rpm" | "unknown"; used?: 
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = 5): Promise<Response> {
   for (let attempt = 0; attempt < retries; attempt++) {
-    // Stamp the current key onto the request
+    const key = getKey();
     const headers = new Headers(options.headers);
-    headers.set("Authorization", `Bearer ${getKey()}`);
+    headers.set("Authorization", `Bearer ${key}`);
     const res = await fetch(url, { ...options, headers });
 
     if (res.status !== 429) return res;
@@ -84,7 +107,8 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 5): P
     // TPD — mark key exhausted and try another if available
     if (info.type === "tpd") {
       markKeyExhausted();
-      const remaining = KEY_RING.filter((_, i) => !KEY_STATE.exhausted.has(i)).length;
+      const ring = getKeyRing();
+      const remaining = ring.filter((_, i) => !KEY_STATE.exhausted.has(i)).length;
       if (remaining > 0) {
         console.warn(`Rotating to next Groq API key (${remaining} left)`);
         continue;
@@ -153,9 +177,13 @@ export function grokChatStream(
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const res = await fetchWithRetry(`${GROQ_BASE}/chat/completions`, {
+        const key = getKey();
+        const res = await fetch(`${GROQ_BASE}/chat/completions`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${key}`,
+          },
           body: JSON.stringify({
             model,
             messages,
@@ -165,8 +193,15 @@ export function grokChatStream(
         });
 
         if (!res.ok) {
-          const err = await res.text();
-          controller.error(new Error(`Grok API error (${res.status}): ${err}`));
+          const errBody = await res.text();
+
+          // Try to detect TPD so the key gets marked
+          if (res.status === 429) {
+            const info = parse429Error(errBody);
+            if (info.type === "tpd") markKeyExhausted();
+          }
+
+          controller.error(new Error(`Grok API error (${res.status}): ${errBody}`));
           return;
         }
 
