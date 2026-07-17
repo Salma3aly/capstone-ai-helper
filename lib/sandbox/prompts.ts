@@ -84,6 +84,20 @@ Idea: "${idea}"
 Analysis:
 ${analysis}
 
+Hard rules for the \`suggested_stack\` field — do not violate these:
+
+1. Each of \`frontend\`, \`backend\`, \`database\` must be a single concrete technology. Never blank, never \`"—"\`, never \`null\`, and never a slash-separated list of options (e.g. \`"MySQL / PostgreSQL"\` is invalid — pick one).
+
+2. Pick the single best fit given the project type. If the project has no real backend need, still name a concrete minimal choice (e.g. \`"Node.js / Express"\` or \`"None (client-only)"\` if truly none is needed) — never leave the field empty.
+
+3. Whatever you return in \`suggested_stack\` here is what the Code step will implement verbatim. Do not suggest one database and let a later step substitute another.
+
+4. Self-check before returning:
+   - Is \`frontend\` a single named technology (not blank, not a list)?
+   - Is \`backend\` a single named technology (not blank, not a list)?
+   - Is \`database\` a single named technology (not blank, not a list)?
+   If any check fails, pick one and fix it before returning.
+
 Return ONLY raw JSON. No markdown, no backticks, no explanation.
 
 Format:
