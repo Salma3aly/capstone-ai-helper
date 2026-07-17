@@ -69,7 +69,7 @@ export default function HubPage() {
 
     const connect = () => {
       try {
-        ws = new WebSocket("ws://localhost:3002");
+        ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002");
         ws.onopen = () => {
           ws?.send(JSON.stringify({ type: "join", userName: user?.name || "Anonymous", userEmail: user?.email || "" }));
         };
@@ -363,9 +363,9 @@ export default function HubPage() {
       <div className="w-64 border-l border-[#e2e8f0] bg-white p-4 space-y-5 hidden lg:flex flex-col overflow-y-auto shrink-0">
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-bold text-xs text-[#0f172a] flex items-center gap-1.5 uppercase tracking-wider">
+             <h4 className="font-bold text-xs text-[#0f172a] flex items-center gap-1.5 uppercase tracking-wider">
               <BookOpen className="w-4 h-4 text-[#ec4899]" />
-              Egypt STEM Rules
+              Community Rules
             </h4>
             <button onClick={() => setShowSidebar(false)}
               className="w-5 h-5 rounded flex items-center justify-center text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition"
@@ -373,7 +373,7 @@ export default function HubPage() {
           </div>
           <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-xl p-3 space-y-2.5">
             <p className="text-[10px] text-[#64748b] leading-normal">
-              Egypt STEM capstone projects are evaluated on engineering merit, journal quality, and academic honesty.
+              Capstone projects are evaluated on engineering merit, journal quality, and academic honesty.
             </p>
             <hr className="border-[#e2e8f0]" />
             <ul className="text-[10px] text-[#475569] space-y-2">
@@ -387,7 +387,7 @@ export default function HubPage() {
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="text-red-400 shrink-0 mt-0.5">•</span>
-                <span><strong className="text-[#0f172a]">Market Sourcing:</strong> Bab El-Louk is standard for hardware.</span>
+                <span><strong className="text-[#0f172a]">Be Respectful:</strong> Treat everyone with courtesy and professionalism.</span>
               </li>
             </ul>
           </div>
