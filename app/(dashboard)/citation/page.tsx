@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
-import { Copy, Check, ExternalLink, Plus, X, Sparkles, Loader2, Download, FileText, Quote } from "lucide-react";
+import { Copy, Check, ExternalLink, Plus, X, Sparkles, Loader2, Download, FileText, Quote, RotateCcw } from "lucide-react";
 import { formatAllCitations } from "@/lib/citation/styles";
 import type { CitationStyle, Source } from "@/lib/citation/types";
 
@@ -243,6 +243,23 @@ export default function CitationPage() {
     setShowCitations(true);
   };
 
+  const handleReset = () => {
+    setUrl("");
+    setTitle("");
+    setSiteName("");
+    setAuthors([""]);
+    setPubDate("");
+    setVolume("");
+    setIssue("");
+    setPages("");
+    setDoi("");
+    setShowCitations(false);
+    setScrapeMsg("");
+    setPdfMsg("");
+    setUploadedFileName("");
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
   return (
     <div className="p-6">
       <div className="max-w-5xl mx-auto">
@@ -251,7 +268,18 @@ export default function CitationPage() {
           <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-gray-150 pb-2">
               <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Source Details</h2>
-              <span className="text-[10px] text-[#ec4899] bg-[#fdf2f8] px-2 py-0.5 rounded-lg font-medium">Automatic scraper active</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="text-[10px] text-gray-400 hover:text-[#db2777] flex items-center gap-1 font-medium transition-colors"
+                  title="Reset all fields"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Reset
+                </button>
+                <span className="text-[10px] text-[#ec4899] bg-[#fdf2f8] px-2 py-0.5 rounded-lg font-medium">Automatic scraper active</span>
+              </div>
             </div>
 
             <div>
