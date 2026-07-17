@@ -4,7 +4,7 @@ import { buildCodePrompt } from "@/lib/sandbox/prompts";
 
 export async function POST(req: NextRequest) {
   try {
-    const { idea, analysis, components, wiring } = await req.json();
+    const { idea, wiring } = await req.json();
     if (!idea || !wiring) {
       return new Response(JSON.stringify({ error: "Idea and wiring are required" }), {
         status: 400,
@@ -12,20 +12,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const wiringStr = JSON.stringify(wiring, null, 2);
+
     const stream = xaiChatStream([
-      {
-        role: "system",
-        content: "You are a senior full-stack developer generating working code. Return ONLY valid JSON. Follow all rules exactly.",
-      },
-      {
-        role: "user",
-        content: buildCodePrompt(
-          idea,
-          analysis ? JSON.stringify(analysis) : "{}",
-          components ? JSON.stringify(components) : "{}",
-          JSON.stringify(wiring)
-        ),
-      },
+      { role: "system", content: "You are a senior full-stack developer generating working code. Return ONLY valid JSON." },
+      { role: "user", content: buildCodePrompt(idea, wiringStr) },
     ], 8192);
 
     return new Response(stream, {
