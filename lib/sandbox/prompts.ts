@@ -29,7 +29,7 @@ WIRING DIAGRAM REQUIREMENTS:
 DATA LOGGING REQUIREMENTS (always include):
 1. Read each sensor at a configurable interval (default 1000ms)
 2. Timestamp each reading using millis() (or RTC if available)
-3. Output data to Serial in CSV format: timestamp_ms,sensor1,sensor2,...
+3. Output data to Serial in CSV format: Serial.print(timestamp); Serial.print(","); Serial.println(sensor1); — note the comma delimiter MUST be a quoted string: Serial.print(","); not Serial.print",";
 4. Add a comment block at the top explaining how to capture Serial output to a .csv file:
    - Arduino: "Tools > Serial Monitor > copy/paste or use Serial Plotter"
    - Include a comment with a Python pyserial script snippet for logging
