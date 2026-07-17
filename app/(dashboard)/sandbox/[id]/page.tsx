@@ -377,6 +377,44 @@ export default function SandboxBuilder({
 
   const runCodeGeneration = async () => {
     if (!project || !wiringDraft) return;
+
+    // If hardware board + sensors are selected, generate Arduino code instead
+    if (hardwareBoard && hardwareSensors.length > 0) {
+      setStreaming(true);
+      setError("");
+      setStreamingContent("");
+      try {
+        const sensorDisplayNames = hardwareSensors.map((id) =>
+          sensorNames[id] || COMPONENTS.find((c) => c.id === id)?.name || id.replace(/^ram-/, "").replace(/-/g, " ")
+        );
+        const res = await fetch("/api/sandbox/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idea: project.rawIdea,
+            boardId: hardwareBoard,
+            sensorIds: hardwareSensors,
+            sensorDisplayNames,
+          }),
+        });
+        const data = await res.json();
+        if (data.error) { setError(data.error); setStreaming(false); return; }
+        const arduinoCode: CodeGeneration = {
+          files: [{ path: "main.ino", content: data.code || "" }],
+          readme: `# ${project.title || "Hardware Project"}\n\nAutomatically generated Arduino code.\n\n## Wiring\n${(data.wiring || []).map((w: WiringItem) => `- ${w.component}: ${w.connections.join(", ")}`).join("\n")}`,
+        };
+        setCodeDraft(arduinoCode);
+        setHardwareWiring(data.wiring || []);
+        const updated = await updateProject(project.id, { code: arduinoCode, stage: "code", hardwareWiring: data.wiring || [] });
+        setProject(updated);
+      } catch {
+        setError("Hardware code generation failed.");
+      } finally {
+        setStreaming(false);
+      }
+      return;
+    }
+
     setStreaming(true);
     setError("");
     setStreamingContent("");
