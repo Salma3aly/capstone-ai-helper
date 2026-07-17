@@ -9,7 +9,7 @@ import {
 import type {
   SandboxProject, SandboxStage, IdeaAnalysis,
   ComponentRecommendation, WiringDiagram, CodeGeneration, WiringItem, RecommendResponse,
-  WiringNode,
+  WiringNode, WiringEdge,
 } from "@/lib/sandbox/types";
 import {
   getProject, updateProject, createProject,
@@ -780,8 +780,6 @@ export default function SandboxBuilder({
     };
 
     // ── Architecture Diagram (dynamic from wiringDraft nodes/edges) ──
-    const VIEW_W = 1200;
-    const VIEW_H = 520;
     const LANE_Y = [90, 200, 310, 420];
     const LANE_LABELS = ["External / Input", "Client / UI", "Services / Logic", "Data / Storage"];
 
@@ -803,27 +801,30 @@ export default function SandboxBuilder({
       database: 3,
     };
 
-    // Compute positions from actual nodes
-    function getNodePositions(nodes: WiringNode[]): Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> {
+    // Compute positions from actual nodes, auto-sizing canvas
+    function getDiagramLayout(nodes: WiringNode[], edges: WiringEdge[]) {
       const byLane: Record<number, WiringNode[]> = {};
       for (const n of nodes) {
         const lane = TYPE_LANE[n.type] ?? 1;
         if (!byLane[lane]) byLane[lane] = [];
         byLane[lane].push(n);
       }
-      const result: Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> = {};
+      const positions: Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> = {};
       let maxLane = 0;
       for (const k of Object.keys(byLane)) maxLane = Math.max(maxLane, Number(k));
+      const maxPerLane = Math.max(1, ...Object.values(byLane).map((a) => a.length));
+      const viewW = Math.max(1200, maxPerLane * 280);
+      const viewH = 520;
+      const hPad = Math.max(80, viewW * 0.08);
       for (let lane = 0; lane <= maxLane; lane++) {
         const laneNodes = byLane[lane] || [];
         const count = laneNodes.length;
         if (count === 0) continue;
-        const hPad = 160;
-        const available = VIEW_W - 2 * hPad;
+        const available = viewW - 2 * hPad;
         const gap = count > 1 ? available / (count - 1) : 0;
         laneNodes.forEach((node, i) => {
           const isInput = lane === 0;
-          result[node.id] = {
+          positions[node.id] = {
             x: hPad + i * gap,
             y: LANE_Y[lane],
             w: 136,
@@ -833,12 +834,53 @@ export default function SandboxBuilder({
           };
         });
       }
-      return result;
+
+      // Self-check: ensure every node referenced by edges has a position
+      // If missing, auto-create a position in lane 1 (fallback)
+      let orphanCount = 0;
+      for (const edge of edges) {
+        if (!positions[edge.from]) {
+          const orphanIdx = Object.keys(positions).length + orphanCount;
+          positions[edge.from] = {
+            x: hPad + (orphanIdx % Math.max(1, Math.floor(((viewW - 2 * hPad)) / 200))) * 200,
+            y: LANE_Y[1],
+            w: 136, h: 36, lane: 1,
+            color: COLORS.service,
+          };
+          orphanCount++;
+        }
+        if (!positions[edge.to]) {
+          const orphanIdx = Object.keys(positions).length + orphanCount;
+          positions[edge.to] = {
+            x: hPad + (orphanIdx % Math.max(1, Math.floor(((viewW - 2 * hPad)) / 200))) * 200,
+            y: LANE_Y[1],
+            w: 136, h: 36, lane: 1,
+            color: COLORS.service,
+          };
+          orphanCount++;
+        }
+      }
+
+      return { positions, viewW, viewH, maxPerLane, orphanCount };
+    }
+
+    // Edge path with same-lane arc routing
+    function getEdgePath(from: { x: number; y: number; h: number; lane: number }, to: typeof from): string {
+      const x1 = from.x, y1 = from.y + from.h / 2;
+      const x2 = to.x, y2 = to.y - to.h / 2;
+      if (from.lane === to.lane) {
+        const midY = Math.min(y1, y1 - 80 - Math.abs(x1 - x2) * 0.15);
+        return `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${midY}, ${x2} ${y2}`;
+      }
+      const cy = (y1 + y2) / 2;
+      return `M ${x1} ${y1} C ${x1} ${cy}, ${x2} ${cy}, ${x2} ${y2}`;
     }
 
     // Reusable SVG diagram renderer
     const renderDiagramSvg = (wide: number, high: number, mini: boolean) => {
-      const nodePositions = getNodePositions(wiringDraft?.nodes || []);
+      const nodes = wiringDraft?.nodes || [];
+      const edges = wiringDraft?.edges || [];
+      const { positions, orphanCount } = getDiagramLayout(nodes, edges);
 
       return (
         <svg viewBox={`0 0 ${wide} ${high}`} className="w-full h-auto" style={{ minWidth: mini ? 'auto' : '850px', maxHeight: mini ? `${high}px` : '540px' }}>
@@ -860,61 +902,28 @@ export default function SandboxBuilder({
             </g>
           ))}
 
-          {/* Edges — bezier curves between node positions */}
-          {wiringDraft?.edges?.map((edge, i) => {
-            const from = nodePositions[edge.from];
-            const to = nodePositions[edge.to];
+          {/* Edges — one visible line per edge entry */}
+          {edges.map((edge, i) => {
+            const from = positions[edge.from];
+            const to = positions[edge.to];
             if (!from || !to) return null;
-            const x1 = from.x;
-            const y1 = from.y + from.h / 2;
-            const x2 = to.x;
-            const y2 = to.y - to.h / 2;
-            const cy = (y1 + y2) / 2;
+            const d = getEdgePath(from, to);
             return (
               <g key={`edge-${i}`}>
-                <path
-                  d={`M ${x1} ${y1} C ${x1} ${cy}, ${x2} ${cy}, ${x2} ${y2}`}
-                  fill="none" stroke={COLORS.arrow} strokeWidth="1.5" markerEnd="url(#arrow)"
-                />
-                <text
-                  x={(x1 + x2) / 2} y={cy - 6}
-                  textAnchor="middle" className="text-[8px] font-medium" fill="#64748b"
-                >
-                  {edge.label}
-                </text>
+                <path d={d} fill="none" stroke={COLORS.arrow} strokeWidth="1.5" markerEnd="url(#arrow)" />
+                <text x={(from.x + to.x) / 2} y={from.lane === to.lane ? Math.min(from.y, to.y) - 46 : ((from.y + from.h / 2) + (to.y - to.h / 2)) / 2 - 6} textAnchor="middle" className="text-[8px] font-medium" fill="#64748b">{edge.label}</text>
               </g>
             );
           })}
 
           {/* Nodes */}
-          {Object.entries(nodePositions).map(([id, pos]) => {
-            const hPad = 6;
-            const textW = pos.w - hPad * 2;
-            const fs = pos.lane === 0 ? 10 : 11;
-            const label = (wiringDraft?.nodes || []).find((n) => n.id === id)?.label || id;
+          {Object.entries(positions).map(([id, pos]) => {
+            const label = nodes.find((n) => n.id === id)?.label || id;
             return (
               <g key={`node-${id}`}>
-                <rect
-                  x={pos.x - pos.w / 2} y={pos.y - pos.h / 2}
-                  width={pos.w} height={pos.h}
-                  rx={pos.lane === 0 ? 4 : 9}
-                  fill={pos.color} filter="url(#shadow)"
-                />
-                {pos.lane !== 0 && (
-                  <rect
-                    x={pos.x - pos.w / 2} y={pos.y - pos.h / 2}
-                    width={pos.w} height={3.5} rx={1.5}
-                    fill="white" fillOpacity="0.18"
-                  />
-                )}
-                <text
-                  x={pos.x} y={pos.y + 4.5}
-                  textAnchor="middle"
-                  className={`text-[${fs}px] font-bold`}
-                  fill="white"
-                >
-                  {label}
-                </text>
+                <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={pos.h} rx={pos.lane === 0 ? 4 : 9} fill={pos.color} filter="url(#shadow)" />
+                {pos.lane !== 0 && <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={3.5} rx={1.5} fill="white" fillOpacity="0.18" />}
+                <text x={pos.x} y={pos.y + 4.5} textAnchor="middle" className={`text-[${pos.lane === 0 ? 10 : 11}px] font-bold`} fill="white">{label}</text>
               </g>
             );
           })}
@@ -952,6 +961,16 @@ export default function SandboxBuilder({
         setSensorNames({ ...sensorNames, [id]: p.name });
       }
     };
+
+    const VIEW_W = Math.max(1200, Math.max(1, ...Object.values(
+      (wiringDraft?.nodes || []).reduce((acc, n) => {
+        const lane = TYPE_LANE[n.type] ?? 1;
+        if (!acc[lane]) acc[lane] = [];
+        acc[lane].push(n);
+        return acc;
+      }, {} as Record<number, WiringNode[]>)
+    ).map((a) => a.length)) * 280);
+    const VIEW_H = 520;
 
     return (
       <div className="max-w-4xl mx-auto space-y-6">
