@@ -10,13 +10,20 @@ function buildSearchQueryFromUrl(parsedUrl: URL, hostname: string): string {
   }
   const segments = parsedUrl.pathname.replace(/\/$/, "").split("/").filter(Boolean);
   const meaningful = segments.filter(
-    (s) => !/^(index|article|view|download|paper|pdf)$/i.test(s) && !/^\d+$/.test(s)
+    (s) => !/^(index|article|view|download|paper|pdf)(\.\w+)?$/i.test(s) && !/^\d+$/.test(s)
   );
   const candidate = meaningful
     .map((s) => s.replace(/[-_]/g, " "))
     .join(" ")
     .trim();
-  if (candidate.length >= 4) return candidate;
+  if (candidate.length >= 4) {
+    // Append numeric segments (article IDs) for better Crossref matching
+    const numericParts = segments.filter((s) => /^\d+$/.test(s) && s.length <= 6);
+    if (numericParts.length > 0) {
+      return (candidate + " " + numericParts.join(" ")).trim();
+    }
+    return candidate;
+  }
   const hostParts = hostname.replace(/^(www|beta|dev)\./i, "").split(".");
   const mainDomain = hostParts.slice(0, hostParts.length - 1).join(" ");
   return mainDomain;
@@ -343,6 +350,47 @@ export async function POST(req: Request) {
       html = ""; // clear so we only use URL-based fallback
     }
 
+    // When the page fetch failed or returned an error page, try common PDF URL patterns
+    // (many journal sites like OJS serve the full article as PDF at predictable URLs)
+    if (!html || html.length < 50) {
+      const baseUrl = cleanUrl.replace(/\/+$/, "");
+      const pdfCandidates = [
+        `${baseUrl}/pdf`,
+        `${baseUrl}?format=pdf`,
+        baseUrl.replace(/\/article\/view\/(\d+)/, "/article/download/$1"),
+        baseUrl.replace(/\/article\/view\/(\d+)/, "/article/view/$1/pdf"),
+      ];
+      for (const pdfUrl of pdfCandidates) {
+        try {
+          const pdfRes = await fetch(pdfUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Accept": "application/pdf,*/*",
+            },
+            signal: AbortSignal.timeout(8000),
+            redirect: "follow",
+          });
+          if (pdfRes.ok) {
+            const contentType = pdfRes.headers.get("content-type") || "";
+            if (contentType.includes("pdf")) {
+              const pdfBuffer = await pdfRes.arrayBuffer();
+              if (pdfBuffer && pdfBuffer.byteLength > 1000) {
+                try {
+                  const { extractTextFromPdf } = await import("@/lib/research/pdf-extract");
+                  const pdfText = extractTextFromPdf(Buffer.from(pdfBuffer));
+                  if (pdfText && pdfText.length > 100) {
+                    html = pdfText; // use PDF text as our "HTML" for extraction
+                    console.error(`Citation scrape: extracted PDF text from ${pdfUrl}`);
+                    break;
+                  }
+                } catch { /* PDF text extraction failed */ }
+              }
+            }
+          }
+        } catch { /* PDF candidate failed */ }
+      }
+    }
+
     // Step 1: Extract from meta tags (gives us baseline data + possible DOI)
     const metaResult = tryExtractMeta(html);
 
@@ -355,12 +403,14 @@ export async function POST(req: Request) {
 
     // Step 3: Try Crossref immediately (same order as PDF pipeline)
     let title = metaResult?.title || userTitle || titleFromUrlPath(parsedUrl.pathname) || "";
-    // When fetch failed, build a higher-quality search query from the URL
-    const fallbackTitle = title || buildSearchQueryFromUrl(parsedUrl, hostname) || "";
+    const urlDerivedTitle = title; // save before Crossref possibly corrupts it
+    // Build the best search query from URL for Crossref fallback
+    const urlQuery = buildSearchQueryFromUrl(parsedUrl, hostname) || "";
+    const fallbackTitle = urlQuery || title;
     if (fetchFailed && fallbackTitle) {
       console.error(`Citation scrape: fetch failed for ${cleanUrl}, using Crossref search with query: "${fallbackTitle}"`);
     }
-    let crossrefData = await extractMetadataFromDoiOrTitle(doi || metaResult?.doi, fallbackTitle || title);
+    let crossrefData = await extractMetadataFromDoiOrTitle(doi || metaResult?.doi, fallbackTitle);
     if (!crossrefData) {
       console.error(`Citation scrape: Crossref returned no data for ${hostname} (query: "${fallbackTitle}")`);
     } else {
@@ -500,6 +550,67 @@ ${snippet}`;
           // LLM failed — keep whatever Crossref/meta gave us
         }
       }
+    }
+
+    // Step 5b: When no HTML was available (fetch blocked / error page), try LLM with just the URL.
+    // Discard any bad Crossref data — start fresh with just the URL context.
+    if ((!html || html.length < 200) && (fetchFailed || authors.length === 0 || !pubDate) && urlDerivedTitle) {
+      const urlClean = cleanUrl.replace(/[?&]$/, "");
+      // Clear bad data so LLM doesn't get influenced — we'll only keep what LLM returns
+      let llmTitle = "";
+      let llmSiteName = "";
+      let llmAuthors: string[] = [];
+      let llmPubDate = "";
+      let llmVolume = "";
+      let llmIssue = "";
+      let llmPages = "";
+      let llmDoi = "";
+      const prompt = `Return ONLY valid JSON with citation metadata for the article at this URL. The site is blocking access, so rely on your training knowledge.
+
+URL: ${urlClean}
+Hint from URL path: "${urlDerivedTitle}" (may be inaccurate — correct it if you know the real title)
+Host domain: "${hostname}"
+
+Respond with EXACTLY this JSON format (no markdown, no backticks):
+{"title": "real article title", "siteName": "journal name", "authors": ["First Last"], "pubDate": "1991", "volume": "12", "issue": "4", "pages": "38", "doi": "10.xxxx/..."}
+
+Rules:
+- title: the actual article title
+- siteName: full journal or publication name
+- authors: EVERY single author — list them all
+- pubDate: 4-digit year
+- volume, issue, pages, doi: journal metadata (empty strings if not applicable)
+- If you don't know any field, use empty string (not null, not "null")`;
+
+      try {
+        const data = await grokChatJSON<ScrapeResult>(
+          [{ role: "user", content: prompt }],
+          "llama-3.3-70b-versatile",
+          2048
+        );
+
+        // Only use what LLM returns — don't fall back to bad Crossref data
+        if (data.title) llmTitle = data.title;
+        if (data.siteName) llmSiteName = data.siteName;
+        if (data.authors && data.authors.length > 0) llmAuthors = data.authors;
+        if (data.volume) llmVolume = data.volume;
+        if (data.issue) llmIssue = data.issue;
+        if (data.pages) llmPages = data.pages;
+        if (data.doi) llmDoi = data.doi;
+        if (data.pubDate) llmPubDate = data.pubDate;
+      } catch {
+        // LLM fallback failed — keep whatever we have
+      }
+
+      // Apply LLM results (overrides everything)
+      if (llmTitle) title = llmTitle;
+      if (llmSiteName) siteName = llmSiteName;
+      if (llmAuthors.length > 0) authors = llmAuthors;
+      if (llmVolume) volume = llmVolume;
+      if (llmIssue) issue = llmIssue;
+      if (llmPages) pages = llmPages;
+      if (llmDoi) doi = llmDoi;
+      if (llmPubDate) pubDate = llmPubDate;
     }
 
     // Fallback date from regex if still missing
