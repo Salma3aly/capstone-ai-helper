@@ -7,7 +7,7 @@ import {
   Edit3, Braces, Box, Network, Zap, Search, ChevronDown, X,
 } from "lucide-react";
 import type {
-  SandboxProject, SandboxStage, IdeaAnalysis,
+  SandboxProject, SandboxStage, IdeaAnalysis, SavedProject,
   ComponentRecommendation, WiringDiagram, CodeGeneration, WiringItem, RecommendResponse,
   WiringNode, WiringEdge,
 } from "@/lib/sandbox/types";
@@ -544,6 +544,33 @@ export default function SandboxBuilder({
       if (stage === "code") updates.code = codeDraft!;
       const updated = await updateProject(project.id, updates);
       setProject(updated);
+
+      // Sync to My Projects (localStorage under capstone-projects key)
+      const boardComp = BOARD_COMPONENTS.find((c) => c.id === hardwareBoard);
+      const boardName = boardComp?.name || "";
+      const lang = boardName.toLowerCase().includes("rpi") && !boardName.toLowerCase().includes("pico")
+        ? "Python (RPi.GPIO)"
+        : boardName.toLowerCase().includes("pico")
+          ? "MicroPython"
+          : "Arduino C++";
+      const legacyEntry: SavedProject = {
+        id: project.id,
+        idea: project.rawIdea,
+        board: boardName,
+        boardId: hardwareBoard || null,
+        sensors: hardwareSensors,
+        sensorNames,
+        wiring: hardwareWiring || [],
+        code: codeDraft?.files?.map((f) => f.content).join("\n\n") || "",
+        language: lang,
+        createdAt: project.createdAt,
+        updatedAt: Date.now(),
+        status: stage === "idea" ? "idea" : (stage === "analyzed" || stage === "components") ? "components" : "generated",
+      };
+      const stored: SavedProject[] = JSON.parse(localStorage.getItem("capstone-projects") || "[]");
+      const idx = stored.findIndex((p) => p.id === project.id);
+      if (idx >= 0) { stored[idx] = legacyEntry; } else { stored.push(legacyEntry); }
+      localStorage.setItem("capstone-projects", JSON.stringify(stored));
     } catch {
       setError("Failed to save");
     } finally {

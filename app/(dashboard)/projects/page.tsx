@@ -57,7 +57,7 @@ export default function ProjectsPage() {
             {projects.map((p) => (
               <Link
                 key={p.id}
-                href={`/sandbox?project=${p.id}`}
+                href={`/sandbox/${p.id}`}
                 className="group relative bg-white border border-gray-200 rounded-lg p-5 hover:shadow-sm hover:border-[#fbcfe8] transition-all duration-200 overflow-hidden"
               >
                 <div className="flex items-start justify-between mb-3">
