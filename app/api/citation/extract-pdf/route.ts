@@ -1,6 +1,24 @@
 import { NextResponse } from "next/server";
 import { extractTextFromPdf } from "@/lib/research/pdf-extract";
 import { grokChatJSON } from "@/lib/sandbox/grok";
+import { extractMetadataFromPdfText } from "@/lib/citation/metadataFetcher";
+
+function cleanString(s: any): string {
+  if (!s || typeof s !== "string") return "";
+  const cleaned = s.trim();
+  const lower = cleaned.toLowerCase();
+  if (lower === "n/a" || lower === "none" || lower === "unknown" || lower === "null" || lower === "undefined") {
+    return "";
+  }
+  return cleaned;
+}
+
+function cleanAuthors(arr: any): string[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((a) => (typeof a === "string" ? a.trim() : ""))
+    .filter((a) => a && !/^(n\/a|none|unknown|null|undefined)$/i.test(a));
+}
 
 export async function POST(req: Request) {
   try {
@@ -25,6 +43,20 @@ export async function POST(req: Request) {
     const snippet = text.slice(0, 6000);
     const fileName = file.name.replace(/\.pdf$/i, "");
 
+    // Step 1: Try Crossref (DOI lookup > title search) for verified metadata
+    const crossrefData = await extractMetadataFromPdfText(text, fileName);
+
+    // Step 2: If Crossref returned good data, use it as the baseline
+    // Then fill any remaining gaps via LLM
+    let title = crossrefData?.title && crossrefData.title !== "Unknown Title" ? crossrefData.title : "";
+    let siteName = crossrefData?.journal || "";
+    let authors = crossrefData?.authors || [];
+    let pubDate = crossrefData?.year || "";
+    let volume = crossrefData?.volume || "";
+    let issue = crossrefData?.issue || "";
+    let pages = crossrefData?.pages || "";
+    let doi = crossrefData?.doi || "";
+
     // Try to extract publication date from raw text using regex patterns
     const dateRegexes = [
       /(?:published|date|created|received|accepted|submitted)[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})/i,
@@ -42,45 +74,80 @@ export async function POST(req: Request) {
       }
     }
 
-    const prompt = `You are an academic citation metadata parser.
-Given the PDF text snippet below, extract:
+    // Step 3: Use LLM to fill any remaining gaps
+    const missingFields: string[] = [];
+    if (!title) missingFields.push("title");
+    if (!siteName) missingFields.push("siteName");
+    if (!authors || authors.length === 0) missingFields.push("authors");
+    if (!volume) missingFields.push("volume");
+    if (!issue) missingFields.push("issue");
+    if (!pages) missingFields.push("pages");
+    if (!doi) missingFields.push("doi");
+    if (!pubDate) missingFields.push("pubDate");
+
+    if (missingFields.length > 0) {
+      const hasExisting = title || siteName || authors.length > 0 || pubDate || volume || issue || pages || doi;
+      const hint = hasExisting
+        ? `We already have partial data from Crossref:\n${JSON.stringify({ title, siteName, authors, pubDate, volume, issue, pages, doi }, null, 2)}\n\nFill in the missing fields: ${missingFields.join(", ")}.`
+        : `Extract ALL metadata fields thoroughly.`;
+
+      const prompt = `You are an academic citation metadata parser.
+Given the PDF text snippet below, ${hint}
+
 - title: paper/article title
-- siteName: journal or publication name (infer from context, empty if unknown)
-- authors: array of author names (find them in the header/abstract area — empty array if none)
-- pubDate: publication date in YYYY-MM-DD format (look near the title or in the abstract — if you find a date string like "${fallbackDate}" convert it to YYYY-MM-DD; empty string if not found)
+- siteName: FULL, complete journal or publication name — NEVER truncate it
+- authors: EVERY single author name as a complete array, in "FirstName LastName" format. List ALL of them.
+- pubDate: publication year only, as a 4-digit string (e.g. "2025")
+- volume: journal volume number as a string (e.g. "35")
+- issue: journal issue/number as a string (e.g. "2")
+- pages: page range or article number as a string (e.g. "101218" or "1-10")
+- doi: DOI identifier (e.g. "10.1016/j.cossms.2025.101218")
 
-Focus especially on finding the **author names** and **publication date** from the PDF header/abstract area.
-Use the filename "${fileName}" as a hint for the title if the text doesn't clearly indicate one.
+Be thorough. Use the filename "${fileName}" as a hint for the title if the text doesn't clearly indicate one.
 
-Return ONLY raw JSON matching: {"title": "...", "siteName": "...", "authors": [...], "pubDate": "..."}
+Return ONLY raw JSON matching: {"title": "...", "siteName": "...", "authors": [...], "pubDate": "2025", "volume": "35", "issue": "2", "pages": "101218", "doi": "10.1016/..."}
 
-If you are unsure about pubDate but find something like "${fallbackDate}" in the text, use that rather than returning empty.
+If you are unsure about pubDate but find something like "${fallbackDate}" in the text, use the year from that rather than returning empty.
 
 PDF text:
 ${snippet}`;
 
-    const data = await grokChatJSON<{ title: string; siteName: string; authors: string[]; pubDate: string }>(
-      [{ role: "user", content: prompt }],
-      "llama-3.3-70b-versatile",
-      2048
-    );
+      try {
+        const data = await grokChatJSON<{ title: string; siteName: string; authors: string[]; pubDate: string; volume: string; issue: string; pages: string; doi: string }>(
+          [{ role: "user", content: prompt }],
+          "llama-3.3-70b-versatile",
+          2048
+        );
 
-    // If LLM didn't find a date but regex did, use the regex result
-    let finalPubDate = data.pubDate || "";
-    if (!finalPubDate && fallbackDate) {
-      const d = new Date(fallbackDate);
-      if (!isNaN(d.getTime())) {
-        finalPubDate = d.toISOString().slice(0, 10);
-      } else {
-        finalPubDate = fallbackDate.replace(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/, "$1-$2-$3");
+        // Merge: LLM fills gaps, but Crossref data takes precedence when non-empty
+        if (data.title && !title) title = data.title;
+        if (data.siteName && !siteName) siteName = data.siteName;
+        if (data.authors && data.authors.length > 0 && authors.length === 0) authors = data.authors;
+        if (data.volume && !volume) volume = data.volume;
+        if (data.issue && !issue) issue = data.issue;
+        if (data.pages && !pages) pages = data.pages;
+        if (data.doi && !doi) doi = data.doi;
+        if (data.pubDate && !pubDate) pubDate = data.pubDate;
+      } catch {
+        // LLM failed — keep whatever Crossref gave us
       }
     }
 
+    // Fallback date from regex if still missing
+    if (!pubDate && fallbackDate) {
+      const m = fallbackDate.match(/\b(20\d{2})\b/);
+      if (m) pubDate = m[0];
+    }
+
     return NextResponse.json({
-      title: data.title || fileName,
-      siteName: data.siteName || "",
-      authors: Array.isArray(data.authors) ? data.authors : [],
-      pubDate: finalPubDate,
+      title: cleanString(title) || fileName,
+      siteName: cleanString(siteName) || "",
+      authors: cleanAuthors(authors),
+      pubDate: cleanString(pubDate),
+      volume: cleanString(volume) || "",
+      issue: cleanString(issue) || "",
+      pages: cleanString(pages) || "",
+      doi: cleanString(doi) || "",
     });
   } catch (error) {
     console.error("PDF extraction API Error:", error);

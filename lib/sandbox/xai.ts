@@ -1,122 +1,96 @@
 // ─── Dual-backend provider ──────────────────────────────────────────────
-// Uses xAI (api.x.ai) when XAI_API_KEY is set; falls back to Groq
-// (api.groq.com) when only GROQ_API_KEY is available.
-// Reads env vars on every call so changes take effect without restart.
+// Uses xAI (api.x.ai) when XAI_API_KEY is set; falls back to Groq via
+// grok.ts (round-robin key rotation with 429 retry). No code duplication.
+
+import { grokChat, grokChatStream, grokChatJSON, getKeyRing, GROQ_BASE, ChatMessage } from "./grok";
 
 const XAI_BASE = "https://api.x.ai/v1";
-const GROQ_BASE = "https://api.groq.com/openai/v1";
 
-interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
-function pickProvider(): { base: string; key: string } {
-  const xaiKey = process.env.XAI_API_KEY || "";
-  if (xaiKey) return { base: XAI_BASE, key: xaiKey };
-
-  const groqRaw = process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "";
-  const groqKeys = groqRaw.split(",").map((k) => k.trim()).filter(Boolean);
-  if (groqKeys.length > 0) return { base: GROQ_BASE, key: groqKeys[0] };
-
-  throw new Error("No API key configured — set XAI_API_KEY or GROQ_API_KEY");
+function hasXaiKey(): boolean {
+  return !!process.env.XAI_API_KEY;
 }
 
 export function getModel(): string {
-  const xaiKey = process.env.XAI_API_KEY || "";
-  if (xaiKey) return process.env.XAI_MODEL || "grok-4-3";
-  return process.env.XAI_MODEL || "llama-3.3-70b-versatile";
+  const override = process.env.XAI_MODEL;
+  if (override) return override;
+  return hasXaiKey() ? "grok-4-3" : "llama-3.3-70b-versatile";
 }
 
-async function apiFetch(
-  path: string,
-  body: Record<string, unknown>,
-): Promise<Response> {
-  const { base, key } = pickProvider();
-  return fetch(`${base}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-  });
-}
+// ── Non-streaming ──
 
 export async function xaiChat(
   messages: ChatMessage[],
   maxTokens = 4096,
 ): Promise<string> {
+  if (!hasXaiKey()) {
+    // Delegate to grok.ts which handles key rotation + 429 retry
+    return grokChat(messages, getModel(), maxTokens);
+  }
+
   const model = getModel();
-  const res = await apiFetch("/chat/completions", {
-    model,
-    messages,
-    max_tokens: maxTokens,
-    stream: false,
+  const res = await fetch(`${XAI_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.XAI_API_KEY}`,
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: false }),
   });
 
   if (!res.ok) {
     const err = await res.text();
-    console.error(`xAI/Groq API error (${res.status}) for model ${model}:`, err);
-    throw new Error(`xAI/Groq API error (${res.status}): ${err}`);
+    console.error(`xAI API error (${res.status}) for model ${model}:`, err);
+    throw new Error(`xAI API error (${res.status}): ${err}`);
   }
 
   const data = await res.json();
-  const choice = data.choices?.[0];
-  const content = choice?.message?.content || "";
-  if (!content) return "";
+  const content = data.choices?.[0]?.message?.content || "";
   return content;
 }
+
+// ── Streaming ──
 
 export function xaiChatStream(
   messages: ChatMessage[],
   maxTokens = 8192,
 ): ReadableStream<Uint8Array> {
+  if (!hasXaiKey()) {
+    // Delegate to grok.ts which handles key rotation + 429 retry
+    return grokChatStream(messages, getModel(), maxTokens);
+  }
+
   const encoder = new TextEncoder();
   let cancelled = false;
 
-  const stream = new ReadableStream({
+  return new ReadableStream({
     async start(controller) {
       try {
-        const { base, key } = pickProvider();
         const model = getModel();
-        const res = await fetch(`${base}/chat/completions`, {
+        const res = await fetch(`${XAI_BASE}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
+            Authorization: `Bearer ${process.env.XAI_API_KEY}`,
           },
-          body: JSON.stringify({
-            model,
-            messages,
-            max_tokens: maxTokens,
-            stream: true,
-          }),
+          body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: true }),
         });
 
         if (!res.ok) {
-          const err = await res.text();
-          controller.error(new Error(`xAI/Groq API error (${res.status}): ${err}`));
+          controller.error(new Error(`xAI API error (${res.status}): ${await res.text()}`));
           return;
         }
 
         const reader = res.body?.getReader();
-        if (!reader) {
-          controller.error(new Error("No response body"));
-          return;
-        }
+        if (!reader) { controller.error(new Error("No response body")); return; }
 
         const decoder = new TextDecoder();
         let buffer = "";
-
         while (!cancelled) {
           const { value, done } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
-
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith("data: ")) continue;
@@ -129,6 +103,7 @@ export function xaiChatStream(
             } catch { /* skip */ }
           }
         }
+        controller.close();
       } catch (err) {
         if (!cancelled) controller.error(err);
       } finally {
@@ -137,19 +112,24 @@ export function xaiChatStream(
     },
     cancel() { cancelled = true; },
   });
-
-  return stream;
 }
+
+// ── JSON helper ──
 
 export async function xaiChatJSON<T>(
   messages: ChatMessage[],
   maxTokens = 4096,
 ): Promise<T> {
+  if (!hasXaiKey()) {
+    // Delegate to grok.ts which handles key rotation + 429 retry
+    return grokChatJSON<T>(messages, getModel(), maxTokens);
+  }
+
   const text = await xaiChat(messages, maxTokens);
   const cleaned = text.replace(/```(?:json)?\s*/g, "").replace(/\s*```/g, "").trim();
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    throw new Error(`Failed to parse AI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
+    throw new Error(`Failed to parse xAI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
   }
 }

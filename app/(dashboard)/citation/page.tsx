@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Copy, Check, ExternalLink, Plus, X, Sparkles, Loader2, Download, FileText, Quote } from "lucide-react";
 import { formatAllCitations } from "@/lib/citation/styles";
 import type { CitationStyle, Source } from "@/lib/citation/types";
@@ -11,12 +11,35 @@ const STYLES: { id: CitationStyle; label: string; desc: string }[] = [
   { id: "AMA", label: "AMA 11th", desc: "American Medical Association" },
 ];
 
+const STORAGE_KEY = "capstone-citation-form";
+
+function loadDraft(): Partial<{
+  url: string; title: string; siteName: string; authors: string[];
+  pubDate: string; volume: string; issue: string; pages: string; doi: string;
+  showCitations: boolean;
+}> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveDraft(values: Record<string, any>) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(values)); } catch { /* noop */ }
+}
+
 export default function CitationPage() {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [siteName, setSiteName] = useState("");
   const [authors, setAuthors] = useState<string[]>([""]);
   const [pubDate, setPubDate] = useState("");
+  const [volume, setVolume] = useState("");
+  const [issue, setIssue] = useState("");
+  const [pages, setPages] = useState("");
+  const [doi, setDoi] = useState("");
+  const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState<CitationStyle | null>(null);
   const [showCitations, setShowCitations] = useState(false);
 
@@ -28,6 +51,22 @@ export default function CitationPage() {
   const [pdfMsg, setPdfMsg] = useState("");
   const [uploadedFileName, setUploadedFileName] = useState("");
 
+  // Restore from localStorage on client-side mount only (avoids SSR/hydration mismatch)
+  useEffect(() => {
+    const draft = loadDraft();
+    if (draft.url !== undefined) setUrl(draft.url || "");
+    if (draft.title !== undefined) setTitle(draft.title || "");
+    if (draft.siteName !== undefined) setSiteName(draft.siteName || "");
+    if (draft.authors?.length) setAuthors(draft.authors);
+    if (draft.pubDate !== undefined) setPubDate(draft.pubDate || "");
+    if (draft.volume !== undefined) setVolume(draft.volume || "");
+    if (draft.issue !== undefined) setIssue(draft.issue || "");
+    if (draft.pages !== undefined) setPages(draft.pages || "");
+    if (draft.doi !== undefined) setDoi(draft.doi || "");
+    if (draft.showCitations) setShowCitations(true);
+    setLoaded(true);
+  }, []);
+
   const source: Source = useMemo(
     () => ({
       url,
@@ -35,11 +74,21 @@ export default function CitationPage() {
       siteName,
       authors: authors.filter((a) => a.trim()),
       pubDate: pubDate || undefined,
+      volume: volume || undefined,
+      number: issue || undefined,
+      pages: pages || undefined,
+      doi: doi || undefined,
     }),
-    [url, title, siteName, authors, pubDate]
+    [url, title, siteName, authors, pubDate, volume, issue, pages, doi]
   );
 
   const citations = useMemo(() => formatAllCitations(source), [source]);
+
+  // Persist form state + citation visibility to localStorage on every change
+  useEffect(() => {
+    if (!loaded) return;
+    saveDraft({ url, title, siteName, authors, pubDate, volume, issue, pages, doi, showCitations });
+  }, [url, title, siteName, authors, pubDate, volume, issue, pages, doi, showCitations, loaded]);
 
   const updateAuthor = (i: number, val: string) => {
     const next = [...authors];
@@ -67,11 +116,16 @@ export default function CitationPage() {
 
   const downloadBib = () => {
     const safeTitle = title.replace(/[^a-z0-9]/gi, "_").toLowerCase().slice(0, 30) || "citation";
-    const bibEntry = `@misc{${safeTitle},
+    const bibEntry = `@article{${safeTitle},
   author = {${source.authors.length > 0 ? source.authors.join(" and ") : "Anonymous"}},
   title = {${title}},
+  journal = {${siteName}},
   year = {${pubDate ? pubDate.split("-")[0] : "n.d."}},
-  howpublished = {${url}}
+  volume = {${volume}},
+  number = {${issue}},
+  pages = {${pages}},
+  doi = {${doi}},
+  url = {${url}}
 }`;
     const blob = new Blob([bibEntry], { type: "text/plain" });
     const blobUrl = URL.createObjectURL(blob);
@@ -91,6 +145,17 @@ export default function CitationPage() {
 
   const autoFillMetadata = async () => {
     if (!url || !url.trim()) return;
+    // Capture any title the user already typed, before clearing
+    const typedTitle = title;
+    // Clear all fields before populating new data — prevents stale state pollution
+    setTitle("");
+    setSiteName("");
+    setAuthors([""]);
+    setPubDate("");
+    setVolume("");
+    setIssue("");
+    setPages("");
+    setDoi("");
     setScraping(true);
     setScrapeMsg("Connecting to site and fetching metadata...");
     setIsSuccess(true);
@@ -99,19 +164,21 @@ export default function CitationPage() {
       const res = await fetch("/api/citation/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: url.trim(), title: typedTitle || undefined }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Autofill failed");
 
-      if (data.title) setTitle(data.title);
-      if (data.siteName) setSiteName(data.siteName);
+      setTitle(data.title || "");
+      setSiteName(data.siteName || "");
       if (data.authors && data.authors.length > 0) {
         setAuthors(data.authors);
-      } else {
-        setAuthors([""]);
       }
-      if (data.pubDate) setPubDate(data.pubDate);
+      setPubDate(data.pubDate || "");
+      setVolume(data.volume || "");
+      setIssue(data.issue || "");
+      setPages(data.pages || "");
+      setDoi(data.doi || "");
 
       setScrapeMsg("Successfully scraped page details!");
       setTimeout(() => setScrapeMsg(""), 4000);
@@ -126,6 +193,15 @@ export default function CitationPage() {
 
   const handlePdfUpload = async (file: File) => {
     if (!file) return;
+    // Clear all fields before populating new data — prevents stale state pollution
+    setTitle("");
+    setSiteName("");
+    setAuthors([""]);
+    setPubDate("");
+    setVolume("");
+    setIssue("");
+    setPages("");
+    setDoi("");
     setPdfUploading(true);
     setPdfMsg("Extracting citation data from PDF...");
     setUploadedFileName("");
@@ -142,14 +218,16 @@ export default function CitationPage() {
         throw new Error(err.error || "PDF processing failed");
       }
       const data = await res.json();
-      if (data.title) setTitle(data.title);
-      if (data.siteName) setSiteName(data.siteName);
+      setTitle(data.title || "");
+      setSiteName(data.siteName || "");
       if (data.authors && data.authors.length > 0) {
         setAuthors(data.authors);
-      } else {
-        setAuthors([""]);
       }
-      if (data.pubDate) setPubDate(data.pubDate);
+      setPubDate(data.pubDate || "");
+      setVolume(data.volume || "");
+      setIssue(data.issue || "");
+      setPages(data.pages || "");
+      setDoi(data.doi || "");
       setPdfMsg("PDF processed — fields populated from extracted data");
       setUploadedFileName(file.name);
     } catch (err: any) {
@@ -216,7 +294,18 @@ export default function CitationPage() {
 
             {/* PDF Upload */}
             <div>
-              <label className="text-xs font-semibold text-gray-500">Upload Research Paper (PDF)</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-gray-500">Upload Research Paper (PDF)</label>
+                {uploadedFileName && (
+                  <button
+                    onClick={() => { setUploadedFileName(""); setPdfMsg(""); }}
+                    className="text-gray-400 hover:text-[#db2777] transition-colors"
+                    title="Remove uploaded file"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
               <div className="mt-1">
                 <label className={`flex flex-col items-center justify-center w-full border-2 border-dashed rounded-lg cursor-pointer transition-colors ${pdfUploading ? "border-gray-200 bg-gray-50" : "border-gray-300 bg-white hover:bg-gray-50 hover:border-[#ec4899]"} ${uploadedFileName ? "border-green-300 bg-green-50" : ""}`}>
                   <div className="flex flex-col items-center justify-center py-5 px-4">
@@ -303,16 +392,61 @@ export default function CitationPage() {
             <div>
               <label className="text-xs font-semibold text-gray-500">Publication Date</label>
               <input
-                type="date"
+                type="text"
                 value={pubDate}
                 onChange={(e) => setPubDate(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black"
+                placeholder="e.g. 2025"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black placeholder-gray-400"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-500">Volume</label>
+                <input
+                  type="text"
+                  value={volume}
+                  onChange={(e) => setVolume(e.target.value)}
+                  placeholder="e.g. 35"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black placeholder-gray-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500">Issue/Number</label>
+                <input
+                  type="text"
+                  value={issue}
+                  onChange={(e) => setIssue(e.target.value)}
+                  placeholder="e.g. 2"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black placeholder-gray-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500">Pages</label>
+                <input
+                  type="text"
+                  value={pages}
+                  onChange={(e) => setPages(e.target.value)}
+                  placeholder="e.g. 1-10"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black placeholder-gray-400"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-gray-500">DOI</label>
+              <input
+                type="text"
+                value={doi}
+                onChange={(e) => setDoi(e.target.value)}
+                placeholder="e.g. 10.1016/j.cossms.2025.101218"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-black placeholder-gray-400"
               />
             </div>
 
             <button
               onClick={handleCite}
-              disabled={!url || !title}
+              disabled={!title && !url}
               className="w-full bg-[#ec4899] hover:bg-[#db2777] disabled:bg-gray-300 text-white font-bold py-3 rounded-lg text-sm transition shadow-sm flex items-center justify-center gap-2"
             >
               <Quote className="w-4 h-4" /> Cite

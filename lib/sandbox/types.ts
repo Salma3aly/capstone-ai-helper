@@ -169,4 +169,5 @@ export interface SandboxProject {
   hardwareSensors?: string[];
   sensorNames?: Record<string, string>;
   hardwareWiring?: WiringItem[];
+  hardwareRecommendation?: RecommendResponse;
 }

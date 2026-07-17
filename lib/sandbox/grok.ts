@@ -1,6 +1,6 @@
-const GROQ_BASE = "https://api.groq.com/openai/v1";
+export const GROQ_BASE = "https://api.groq.com/openai/v1";
 
-interface ChatMessage {
+export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
@@ -10,7 +10,7 @@ interface ChatMessage {
 // call, so adding keys to .env.local takes effect immediately (no restart).
 // Keys rotate round-robin; exhausted keys (TPD) are skipped.
 
-function getKeyRing(): string[] {
+export function getKeyRing(): string[] {
   const raw = process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "";
   if (!raw) throw new Error("GROQ_API_KEY or GROQ_API_KEYS env var is required");
   return raw.split(",").map((k) => k.trim()).filter(Boolean);
@@ -25,7 +25,7 @@ const KEY_STATE = {
 
 const RESET_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
-function getKey(): string {
+export function getKey(): string {
   const ring = getKeyRing();
 
   // If the key count changed (new keys added), reset exhausted state
@@ -62,7 +62,7 @@ function getKey(): string {
   return ring[KEY_STATE.index];
 }
 
-function markKeyExhausted() {
+export function markKeyExhausted() {
   KEY_STATE.exhausted.add(KEY_STATE.index);
   const ring = getKeyRing();
   const remaining = ring.filter((_, i) => !KEY_STATE.exhausted.has(i)).length;
@@ -70,7 +70,7 @@ function markKeyExhausted() {
 }
 
 /** Parse 429 body to determine if it's TPD (hard daily cap) or RPM (can retry) */
-function parse429Error(body: string): { type: "tpd" | "rpm" | "unknown"; used?: number; limit?: number } {
+export function parse429Error(body: string): { type: "tpd" | "rpm" | "unknown"; used?: number; limit?: number } {
   try {
     const parsed = JSON.parse(body);
     const msg = parsed?.error?.message || "";
@@ -177,70 +177,86 @@ export function grokChatStream(
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const key = getKey();
-        const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages,
-            max_tokens: maxTokens,
-            stream: true,
-          }),
-        });
+        const ring = getKeyRing();
+        let lastError: string | null = null;
 
-        if (!res.ok) {
-          const errBody = await res.text();
+        for (let attempt = 0; attempt < ring.length; attempt++) {
+          const key = getKey();
+          const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${key}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages,
+              max_tokens: maxTokens,
+              stream: true,
+            }),
+          });
 
-          // Try to detect TPD so the key gets marked
+          // Handle 429 — mark exhausted and try next key
           if (res.status === 429) {
+            const errBody = await res.text();
             const info = parse429Error(errBody);
             if (info.type === "tpd") markKeyExhausted();
+            console.warn(`Groq key ${KEY_STATE.index} hit 429, rotating to next key (attempt ${attempt + 1}/${ring.length})`);
+            lastError = errBody;
+            continue;
           }
 
-          controller.error(new Error(`Grok API error (${res.status}): ${errBody}`));
-          return;
-        }
+          if (!res.ok) {
+            controller.error(new Error(`Grok API error (${res.status}): ${await res.text()}`));
+            return;
+          }
 
-        const reader = res.body?.getReader();
-        if (!reader) {
-          controller.error(new Error("No response body from Grok"));
-          return;
-        }
+          const reader = res.body?.getReader();
+          if (!reader) {
+            controller.error(new Error("No response body from Grok"));
+            return;
+          }
 
-        const decoder = new TextDecoder();
-        let buffer = "";
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-        while (!cancelled) {
-          const { value, done } = await reader.read();
-          if (done) break;
+          while (!cancelled) {
+            const { value, done } = await reader.read();
+            if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data: ")) continue;
-            const payload = trimmed.slice(6);
-            if (payload === "[DONE]") {
-              controller.close();
-              return;
-            }
-            try {
-              const parsed = JSON.parse(payload);
-              const content = parsed.choices?.[0]?.delta?.content || "";
-              if (content) {
-                controller.enqueue(encoder.encode(content));
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith("data: ")) continue;
+              const payload = trimmed.slice(6);
+              if (payload === "[DONE]") {
+                controller.close();
+                return;
               }
-            } catch {
-              // skip malformed JSON lines
+              try {
+                const parsed = JSON.parse(payload);
+                const content = parsed.choices?.[0]?.delta?.content || "";
+                if (content) {
+                  controller.enqueue(encoder.encode(content));
+                }
+              } catch {
+                // skip malformed JSON lines
+              }
             }
           }
+
+          controller.close();
+          return;
         }
+
+        // All keys exhausted
+        const usage = lastError
+          ? (() => { try { const p = JSON.parse(lastError); const m = p?.error?.message || ""; const u = m.match(/Used\s*(\d+)/i); const l = m.match(/Limit\s*(\d+)/i); return u && l ? ` (${u[1]}/${l[1]} tokens used today)` : ""; } catch { return ""; } })()
+          : "";
+        controller.error(new Error(`429 TPD${usage} — all Groq API keys exhausted. Try again later.`));
       } catch (err) {
         if (!cancelled) controller.error(err);
       } finally {

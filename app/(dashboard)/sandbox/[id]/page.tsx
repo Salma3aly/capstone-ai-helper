@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import type {
   SandboxProject, SandboxStage, IdeaAnalysis,
-  ComponentRecommendation, WiringDiagram, CodeGeneration, WiringItem,
+  ComponentRecommendation, WiringDiagram, CodeGeneration, WiringItem, RecommendResponse,
+  WiringNode,
 } from "@/lib/sandbox/types";
 import {
   getProject, updateProject, createProject,
@@ -73,6 +74,7 @@ export default function SandboxBuilder({
   const [hardwareSensors, setHardwareSensors] = useState<string[]>([]);
   const [sensorNames, setSensorNames] = useState<Record<string, string>>({});
   const [hardwareWiring, setHardwareWiring] = useState<WiringItem[]>([]);
+  const [hardwareRecommendation, setHardwareRecommendation] = useState<RecommendResponse | null>(null);
   const [hoveredConnection, setHoveredConnection] = useState<{ component: string; connectionIndex: number } | null>(null);
   const [editFeedback, setEditFeedback] = useState("");
   const [genHardwareLoading, setGenHardwareLoading] = useState(false);
@@ -85,6 +87,13 @@ export default function SandboxBuilder({
   // ── RAM components ────────────────────────────────────────────────
   const [ramProducts, setRamProducts] = useState<RamProduct[]>([]);
   const [ramLoading, setRamLoading] = useState(false);
+
+  // ── Diagram fullscreen ────────────────────────────────────────────
+  const [diagramFullscreen, setDiagramFullscreen] = useState(false);
+
+  // ── Hardware wiring refs (must be before load project useEffect) ──
+  const autoRecalcEnabled = useRef(false);
+  const initialHwTriggered = useRef(false);
 
   // ── Load project ──────────────────────────────────────────────────
   useEffect(() => {
@@ -104,6 +113,11 @@ export default function SandboxBuilder({
         if (p.hardwareSensors) setHardwareSensors(p.hardwareSensors);
         if (p.sensorNames) setSensorNames(p.sensorNames);
         if (p.hardwareWiring) setHardwareWiring(p.hardwareWiring);
+        if (p.hardwareRecommendation) {
+          setHardwareRecommendation(p.hardwareRecommendation);
+          initialHwTriggered.current = true; // was already set up in a previous session
+          autoRecalcEnabled.current = true;
+        }
       })
       .catch(() => setError("Failed to load project"))
       .finally(() => setLoading(false));
@@ -135,6 +149,82 @@ export default function SandboxBuilder({
   const meta = STAGE_META[stage];
   const isLastStage = stage === "code";
 
+  // ── Hardware wiring auto-recalculate on user changes (debounced) ──
+  useEffect(() => {
+    if (!autoRecalcEnabled.current) return;
+    if (!hardwareBoard || hardwareSensors.length === 0) return;
+    const timer = setTimeout(generateHardwareWiring, 800);
+    return () => clearTimeout(timer);
+  }, [hardwareBoard, hardwareSensors.join(",")]);
+
+  // ── Auto-trigger hardware wiring when entering wiring step ──
+  useEffect(() => {
+    if (stage !== "wiring") return;
+    if (initialHwTriggered.current) return;
+    if (!project) return;
+    initialHwTriggered.current = true;
+
+    const doSetup = async () => {
+      if (hardwareRecommendation) {
+        // Use existing recommendation from analyze step
+        await applyHwRecommendation(hardwareRecommendation);
+        autoRecalcEnabled.current = true;
+        return;
+      }
+      // No recommendation yet — get one with full project context
+      try {
+        const recRes = await fetch("/api/sandbox/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idea: project.rawIdea,
+            title: project.title,
+            analysis: analysisDraft,
+            components: componentsDraft,
+            wiring: wiringDraft,
+          }),
+        });
+        if (!recRes.ok) return;
+        const rec = await recRes.json() as RecommendResponse;
+        setHardwareRecommendation(rec);
+        await applyHwRecommendation(rec);
+      } catch { /* fall back to manual selection */ }
+      autoRecalcEnabled.current = true;
+    };
+    doSetup();
+  }, [stage]);
+
+  const applyHwRecommendation = async (rec: RecommendResponse) => {
+    setHardwareBoard(rec.boardId);
+    const sensorIds = rec.sensorIds;
+    const displayNames: Record<string, string> = {};
+    sensorIds.forEach((id) => {
+      const comp = COMPONENTS.find((c) => c.id === id);
+      if (comp) displayNames[id] = comp.name;
+      else displayNames[id] = id.replace(/^ram-/, "").replace(/-/g, " ");
+    });
+    setHardwareSensors(sensorIds);
+    setSensorNames(displayNames);
+
+    const sensorDisplayNames = sensorIds.map((id) => displayNames[id]);
+    try {
+      const res = await fetch("/api/sandbox/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idea: project!.rawIdea,
+          boardId: rec.boardId,
+          sensorIds,
+          sensorDisplayNames,
+        }),
+      });
+      const data = await res.json();
+      if (!data.error) setHardwareWiring(data.wiring || []);
+    } catch {
+      setError("Auto-generating hardware wiring failed.");
+    }
+  };
+
   const canAdvance = useCallback((): string | null => {
     if (!project) return "No project loaded";
     if (stage === "idea" && !project.rawIdea.trim()) return "Enter an idea first";
@@ -153,7 +243,10 @@ export default function SandboxBuilder({
     const nextStage = STAGE_ORDER[nextIdx];
 
     // Persist current stage data
-    if (stage === "analyzed") updates.analysis = analysisDraft;
+    if (stage === "analyzed") {
+      updates.analysis = analysisDraft;
+      if (hardwareRecommendation) updates.hardwareRecommendation = hardwareRecommendation;
+    }
     else if (stage === "components") updates.components = componentsDraft;
     else if (stage === "wiring") {
       updates.wiring = wiringDraft;
@@ -174,7 +267,7 @@ export default function SandboxBuilder({
     } finally {
       setSaving(false);
     }
-  }, [project, stage, analysisDraft, componentsDraft, wiringDraft, codeDraft, hardwareBoard, hardwareSensors, sensorNames, hardwareWiring]);
+  }, [project, stage, analysisDraft, componentsDraft, wiringDraft, codeDraft, hardwareBoard, hardwareSensors, sensorNames, hardwareWiring, hardwareRecommendation]);
 
   const goBackStage = useCallback(async () => {
     if (!project) return;
@@ -198,16 +291,36 @@ export default function SandboxBuilder({
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/sandbox/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea: project.rawIdea }),
-      });
-      const data = await res.json();
-      if (data.error) { setError(data.error); return; }
-      const analysis = data.analysis as IdeaAnalysis;
+      const [anaRes, recRes] = await Promise.all([
+        fetch("/api/sandbox/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idea: project.rawIdea }),
+        }),
+        fetch("/api/sandbox/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idea: project.rawIdea }),
+        }).catch(() => null),
+      ]);
+
+      const anaData = await anaRes.json();
+      if (anaData.error) { setError(anaData.error); return; }
+      const analysis = anaData.analysis as IdeaAnalysis;
       setAnalysisDraft(analysis);
-      const updated = await updateProject(project.id, { analysis, title: analysis.title || project.title, stage: "analyzed" });
+
+      let rec: RecommendResponse | null = null;
+      if (recRes && recRes.ok) {
+        rec = await recRes.json() as RecommendResponse;
+        setHardwareRecommendation(rec);
+      }
+
+      const updated = await updateProject(project.id, {
+        analysis,
+        title: analysis.title || project.title,
+        stage: "analyzed",
+        hardwareRecommendation: rec || undefined,
+      });
       setProject(updated);
     } catch {
       setError("Analysis failed. Please try again.");
@@ -255,39 +368,6 @@ export default function SandboxBuilder({
       const wiring = data.wiring as WiringDiagram;
       setWiringDraft(wiring);
       await updateProject(project.id, { wiring, stage: "wiring" });
-
-      // Auto-recommend hardware
-      const recRes = await fetch("/api/sandbox/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea: project.rawIdea }),
-      });
-      const recData = await recRes.json();
-      if (recData.error) { setError(recData.error); return; }
-      const { boardId, sensorIds, why } = recData;
-      setHardwareBoard(boardId);
-      const nameMap: Record<string, string> = {};
-      sensorIds.forEach((id: string) => {
-        const comp = BOARD_COMPONENTS.find((c) => c.id === id) || COMPONENTS.find((c) => c.id === id);
-        if (comp) nameMap[id] = comp.name;
-        else nameMap[id] = id;
-      });
-      setSensorNames(nameMap);
-      setHardwareSensors(sensorIds);
-
-      // Auto-generate hardware wiring
-      const sensorDisplayNames = sensorIds.map((id: string) =>
-        nameMap[id] || COMPONENTS.find((c: any) => c.id === id)?.name || id
-      );
-      const genRes = await fetch("/api/sandbox/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea: project.rawIdea, boardId, sensorIds, sensorDisplayNames }),
-      });
-      const genData = await genRes.json();
-      if (!genData.error) {
-        setHardwareWiring(genData.wiring || []);
-      }
     } catch {
       setError("Wiring generation failed.");
     } finally {
@@ -305,7 +385,12 @@ export default function SandboxBuilder({
       const res = await fetch("/api/sandbox/generate-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea: project.rawIdea, wiring: wiringDraft }),
+        body: JSON.stringify({
+          idea: project.rawIdea,
+          analysis: project.analysis,
+          components: project.components,
+          wiring: wiringDraft,
+        }),
       });
 
       if (!res.ok) {
@@ -689,49 +774,166 @@ export default function SandboxBuilder({
   const renderWiringStep = () => {
     const boardComp = BOARD_COMPONENTS.find((c) => c.id === hardwareBoard);
     const selectedBoardName = boardComp?.name || "";
-    const sensorDisplayName = (id: string) =>
-      sensorNames[id] || BOARD_COMPONENTS.find((c) => c.id === id)?.name || COMPONENTS.find((c) => c.id === id)?.name || id.replace(/^ram-/, "").replace(/-/g, " ");
-
-    // Layered dynamic layout for Architecture Diagram
-    const getLayerIndex = (type: string): number => {
-      const t = type.toLowerCase();
-      if (t.includes("sensor")) return 0;
-      if (t.includes("page") || t === "ui" || t === "client") return 1;
-      if (t.includes("db") || t.includes("database") || t === "external" || t === "api") return 3;
-      return 2; // Default for controller, system, broker, service, server, etc.
+    const sensorDisplayName = (id: string): string => {
+      const raw = sensorNames[id] || BOARD_COMPONENTS.find((c) => c.id === id)?.name || COMPONENTS.find((c) => c.id === id)?.name || id.replace(/^ram-/, "").replace(/-/g, " ");
+      return typeof raw === "string" ? raw : String(raw);
     };
 
-    const nodePositions = new Map<string, { x: number; y: number }>();
-    let viewW = 800;
-    let viewH = 520;
-    const layerInfo = [
-      { y: 90, label: "Sensors / Input" },
-      { y: 200, label: "Client / UI" },
-      { y: 310, label: "Services / Logic" },
-      { y: 420, label: "Data / External" },
-    ];
-    if (wiringDraft) {
-      const nodesByLayer: Record<number, typeof wiringDraft.nodes> = { 0: [], 1: [], 2: [], 3: [] };
-      wiringDraft.nodes.forEach((node) => {
-        const layer = getLayerIndex(node.type);
-        nodesByLayer[layer].push(node);
-      });
+    // ── Architecture Diagram (dynamic from wiringDraft nodes/edges) ──
+    const VIEW_W = 1200;
+    const VIEW_H = 520;
+    const LANE_Y = [90, 200, 310, 420];
+    const LANE_LABELS = ["External / Input", "Client / UI", "Services / Logic", "Data / Storage"];
 
-      const maxNodesPerLayer = Math.max(
-        ...Object.values(nodesByLayer).map((n) => n.length), 1
-      );
-      viewW = Math.max(800, maxNodesPerLayer * 200);
+    // Brand palette — all from the actual Capstone brand family
+    const COLORS = {
+      page:     "#ec4899",
+      service:  "#a855f7",
+      database: "#8b5cf6",
+      external: "#3b82f6",
+      arrow:    "#94a3b8",
+      laneEven: "#f8fafc",
+      laneOdd:  "#f1f5f9",
+    };
 
-      [0, 1, 2, 3].forEach((layerIndex) => {
-        const nodesInLayer = nodesByLayer[layerIndex];
-        const count = nodesInLayer.length;
-        nodesInLayer.forEach((node, k) => {
-          const x = (viewW / (count + 1)) * (k + 1);
-          const y = layerInfo[layerIndex].y;
-          nodePositions.set(node.id, { x, y });
+    const TYPE_LANE: Record<string, number> = {
+      external: 0,
+      page: 1,
+      service: 2,
+      database: 3,
+    };
+
+    // Compute positions from actual nodes
+    function getNodePositions(nodes: WiringNode[]): Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> {
+      const byLane: Record<number, WiringNode[]> = {};
+      for (const n of nodes) {
+        const lane = TYPE_LANE[n.type] ?? 1;
+        if (!byLane[lane]) byLane[lane] = [];
+        byLane[lane].push(n);
+      }
+      const result: Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> = {};
+      let maxLane = 0;
+      for (const k of Object.keys(byLane)) maxLane = Math.max(maxLane, Number(k));
+      for (let lane = 0; lane <= maxLane; lane++) {
+        const laneNodes = byLane[lane] || [];
+        const count = laneNodes.length;
+        if (count === 0) continue;
+        const hPad = 160;
+        const available = VIEW_W - 2 * hPad;
+        const gap = count > 1 ? available / (count - 1) : 0;
+        laneNodes.forEach((node, i) => {
+          const isInput = lane === 0;
+          result[node.id] = {
+            x: hPad + i * gap,
+            y: LANE_Y[lane],
+            w: 136,
+            h: isInput ? 28 : 36,
+            lane,
+            color: COLORS[node.type] || COLORS.service,
+          };
         });
-      });
+      }
+      return result;
     }
+
+    // Reusable SVG diagram renderer
+    const renderDiagramSvg = (wide: number, high: number, mini: boolean) => {
+      const nodePositions = getNodePositions(wiringDraft?.nodes || []);
+
+      return (
+        <svg viewBox={`0 0 ${wide} ${high}`} className="w-full h-auto" style={{ minWidth: mini ? 'auto' : '850px', maxHeight: mini ? `${high}px` : '540px' }}>
+          <defs>
+            <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+              <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodOpacity="0.14" />
+            </filter>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 9 5 L 0 9 z" fill={COLORS.arrow} />
+            </marker>
+          </defs>
+
+          {/* Lane backgrounds */}
+          {LANE_Y.map((y, i) => (
+            <g key={`lane-${i}`}>
+              <rect x={0} y={y - 38} width={wide} height={76} fill={i % 2 === 0 ? COLORS.laneEven : COLORS.laneOdd} rx="6" />
+              <line x1={0} y1={y - 38} x2={wide} y2={y - 38} stroke="#e2e8f0" strokeWidth="1" />
+              <text x={14} y={y - 19} textAnchor="start" className="text-[8px] font-medium uppercase tracking-wider" fill="#94a3b8">{LANE_LABELS[i]}</text>
+            </g>
+          ))}
+
+          {/* Edges — bezier curves between node positions */}
+          {wiringDraft?.edges?.map((edge, i) => {
+            const from = nodePositions[edge.from];
+            const to = nodePositions[edge.to];
+            if (!from || !to) return null;
+            const x1 = from.x;
+            const y1 = from.y + from.h / 2;
+            const x2 = to.x;
+            const y2 = to.y - to.h / 2;
+            const cy = (y1 + y2) / 2;
+            return (
+              <g key={`edge-${i}`}>
+                <path
+                  d={`M ${x1} ${y1} C ${x1} ${cy}, ${x2} ${cy}, ${x2} ${y2}`}
+                  fill="none" stroke={COLORS.arrow} strokeWidth="1.5" markerEnd="url(#arrow)"
+                />
+                <text
+                  x={(x1 + x2) / 2} y={cy - 6}
+                  textAnchor="middle" className="text-[8px] font-medium" fill="#64748b"
+                >
+                  {edge.label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Nodes */}
+          {Object.entries(nodePositions).map(([id, pos]) => {
+            const hPad = 6;
+            const textW = pos.w - hPad * 2;
+            const fs = pos.lane === 0 ? 10 : 11;
+            const label = (wiringDraft?.nodes || []).find((n) => n.id === id)?.label || id;
+            return (
+              <g key={`node-${id}`}>
+                <rect
+                  x={pos.x - pos.w / 2} y={pos.y - pos.h / 2}
+                  width={pos.w} height={pos.h}
+                  rx={pos.lane === 0 ? 4 : 9}
+                  fill={pos.color} filter="url(#shadow)"
+                />
+                {pos.lane !== 0 && (
+                  <rect
+                    x={pos.x - pos.w / 2} y={pos.y - pos.h / 2}
+                    width={pos.w} height={3.5} rx={1.5}
+                    fill="white" fillOpacity="0.18"
+                  />
+                )}
+                <text
+                  x={pos.x} y={pos.y + 4.5}
+                  textAnchor="middle"
+                  className={`text-[${fs}px] font-bold`}
+                  fill="white"
+                >
+                  {label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Legend */}
+          {!mini && (
+            <g transform={`translate(14, ${high - 28})`}>
+              <rect x={0} y={0} width={280} height={22} rx={5} fill="#ffffff" stroke="#e2e8f0" strokeWidth="0.5" filter="url(#shadow)" />
+              {Object.entries({ page: COLORS.page, service: COLORS.service, database: COLORS.database, external: COLORS.external }).map(([key, color], i) => (
+                <g key={key} transform={`translate(${8 + i * 66}, 6)`}>
+                  <rect x={0} y={0} width={9} height={9} rx={2} fill={color} />
+                  <text x={13} y={7.5} className="text-[7px] font-medium" fill="#64748b">{key}</text>
+                </g>
+              ))}
+            </g>
+          )}
+        </svg>
+      );
+    };
 
     // RAM filter
     const filteredRam = ramProducts.filter((p) => {
@@ -781,101 +983,50 @@ export default function SandboxBuilder({
                 </div>
 
                 <div className="flex flex-col gap-6">
-                  {/* SVG diagram */}
-                  <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-xl p-4 min-h-[400px] overflow-x-auto">
-                    <svg viewBox={`0 0 ${viewW} ${viewH}`} className="w-full h-auto" style={{ minWidth: '750px', maxHeight: '560px' }}>
-                      <defs>
-                        <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
-                          <feDropShadow dx="0" dy="2" stdDeviation="2" floodOpacity="0.15" />
-                        </filter>
-                        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                          <path d="M 0 1 L 9 5 L 0 9 z" fill="#94a3b8" />
-                        </marker>
-                      </defs>
-
-                      {/* Layer background zones */}
-                      {layerInfo.map((layer, i) => (
-                        <g key={`zone-${i}`}>
-                          <rect x={0} y={layer.y - 35} width={viewW} height={70} fill={i % 2 === 0 ? "#fef2f2" : "#fff1f2"} rx="6" />
-                          <rect x={0} y={layer.y - 35} width={3} height={70} fill={["#f43f5e", "#ec4899", "#8b5cf6", "#22c55e"][i % 4]} rx="1.5" />
-                          <text x={10} y={layer.y - 16} textAnchor="start" className="text-[7px] font-bold uppercase tracking-wider" fill="#94a3b8">{layer.label}</text>
-                        </g>
-                      ))}
-
-                      {/* Edge connections */}
-                      {wiringDraft.edges.map((edge, i) => {
-                        const fromNode = wiringDraft.nodes.find((n) => n.id === edge.from);
-                        const toNode = wiringDraft.nodes.find((n) => n.id === edge.to);
-                        if (!fromNode || !toNode) return null;
-                        const fromPt = nodePositions.get(fromNode.id);
-                        const toPt = nodePositions.get(toNode.id);
-                        if (!fromPt || !toPt) return null;
-
-                        const fx = fromPt.x, fy = fromPt.y;
-                        const tx = toPt.x, ty = toPt.y;
-                        const dx = tx - fx, dy = ty - fy;
-                        const len = Math.sqrt(dx * dx + dy * dy);
-                        const cos = len > 0 ? Math.abs(dx) / len : 1;
-                        const sin = len > 0 ? Math.abs(dy) / len : 0;
-                        const off = 16 * sin + 68 * cos;
-                        const sfx = len > 40 ? fx + (dx / len) * off : fx;
-                        const sfy = len > 40 ? fy + (dy / len) * off : fy;
-                        const stx = len > 40 ? tx - (dx / len) * (off + 5) : tx;
-                        const sty = len > 40 ? ty - (dy / len) * (off + 5) : ty;
-
-                        const cpx = (sfx + stx) / 2;
-                        const cpy = (sfy + sty) / 2;
-                        const yOffset = Math.abs(ty - fy) > 10 ? Math.abs(ty - fy) * 0.25 : 25;
-                        const midY = (sfy + sty) / 2 - yOffset;
-
-                        const mx = stx - (stx - sfx) * 0.5;
-                        const my = sty - (sty - sfy) * 0.5;
-                        const labelW = edge.label.length * 5.5 + 12;
-                        const labelH = 18;
-
-                        return (
-                          <g key={i}>
-                            <path d={`M ${sfx} ${sfy} Q ${cpx} ${midY} ${stx} ${sty}`} fill="none" stroke="#94a3b8" strokeWidth="1.5" markerEnd="url(#arrow)" />
-                            <rect x={mx - labelW / 2} y={my - labelH / 2} width={labelW} height={labelH} fill="#ffffff" rx="4" stroke="#e2e8f0" strokeWidth="0.5" filter="url(#shadow)" />
-                            <text x={mx} y={my + 4} textAnchor="middle" className="text-[8.5px] font-semibold" fill="#475569">{edge.label}</text>
-                          </g>
-                        );
-                      })}
-
-                      {/* Render nodes */}
-                      {wiringDraft.nodes.map((node) => {
-                        const pos = nodePositions.get(node.id);
-                        if (!pos) return null;
-                        const { x, y } = pos;
-                        const colors: Record<string, string> = {
-                          page: "#db2777", service: "#2563eb", database: "#7c3aed",
-                          external: "#d97706",
-                        };
-                        const nodeType = node.type.toLowerCase();
-                        const nodeColor = colors[nodeType] || "#475569";
-                        const truncLabel = node.label.length > 18 ? node.label.slice(0, 16) + "…" : node.label;
-
-                        return (
-                          <g key={node.id}>
-                            <rect x={x - 72} y={y - 17} width={144} height={34} rx={9} fill={nodeColor} filter="url(#shadow)" />
-                            <rect x={x - 72} y={y - 17} width={144} height={3} rx={1.5} fill="white" fillOpacity="0.2" />
-                            <text x={x} y={y + 5} textAnchor="middle" className="text-[10px] font-bold" fill="white">{truncLabel}</text>
-                          </g>
-                        );
-                      })}
-
-                      {/* Legend */}
-                      <g transform={`translate(12, ${viewH - 28})`}>
-                        <rect x={0} y={0} width={200} height={22} rx={6} fill="#ffffff" stroke="#e2e8f0" strokeWidth="0.5" filter="url(#shadow)" />
-                        {Object.entries({ page: "#db2777", service: "#2563eb", database: "#7c3aed", external: "#d97706" }).map(([key, color], i) => (
-                          <g key={key} transform={`translate(${6 + i * 48}, 6)`}>
-                            <rect x={0} y={0} width={8} height={8} rx={2} fill={color} />
-                            <text x={11} y={7} className="text-[6px] font-semibold" fill="#64748b">{key}</text>
-                          </g>
-                        ))}
-                      </g>
-                    </svg>
+                  {/* SVG diagram — fixed hierarchical data-flow */}
+                  <div className="relative bg-[#f8fafc] border border-[#e2e8f0] rounded-xl p-4 min-h-[400px] overflow-x-auto">
+                    {renderDiagramSvg(VIEW_W, VIEW_H, false)}
+                    {/* Fullscreen button */}
+                    <button
+                      onClick={() => setDiagramFullscreen(true)}
+                      className="absolute bottom-3 right-3 flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-[#64748b] bg-white border border-[#e2e8f0] rounded-lg hover:bg-[#f8fafc] hover:text-[#e11d48] transition shadow-sm"
+                      title="Enlarge Diagram"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="15 3 21 3 21 9" />
+                        <polyline points="9 21 3 21 3 15" />
+                        <line x1="21" y1="3" x2="14" y2="10" />
+                        <line x1="3" y1="21" x2="10" y2="14" />
+                      </svg>
+                      Enlarge Diagram
+                    </button>
                   </div>
+
+                  {/* Fullscreen overlay modal */}
+                  {diagramFullscreen && (
+                    <div
+                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                      onClick={() => setDiagramFullscreen(false)}
+                    >
+                      <div
+                        className="relative w-[95vw] h-[92vh] bg-white rounded-2xl shadow-2xl overflow-auto p-6"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => setDiagramFullscreen(false)}
+                          className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#64748b] bg-white border border-[#e2e8f0] rounded-lg hover:bg-[#f8fafc] hover:text-[#e11d48] transition shadow-sm"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                          Close
+                        </button>
+                        <div className="w-full h-full flex items-center justify-center py-4">
+                          {renderDiagramSvg(VIEW_W, VIEW_H, true)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Edit & Regenerate panel — under the diagram */}
                   <div className="border-t border-[#e2e8f0] pt-5 space-y-3">
@@ -951,7 +1102,7 @@ export default function SandboxBuilder({
                 </div>
               </div>
 
-            {/* Hardware Wiring — select or AI-recommended */}
+             {/* Hardware Wiring — always visible, user fills in if needed */}
             <div className="bg-white border border-[#e2e8f0] rounded-2xl p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-[#0f172a] flex items-center gap-1.5">
@@ -965,6 +1116,22 @@ export default function SandboxBuilder({
                   )}
                 </div>
               </div>
+
+              {/* Recommendation banner */}
+              {hardwareRecommendation && hardwareWiring.length === 0 && genHardwareLoading && (
+                <div className="bg-[#fdf2f8] border border-[#fbcfe8] rounded-lg p-3 flex items-start gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#ec4899] shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-[#db2777]">Auto-recommending components...</p>
+                    <p className="text-[11px] text-[#be185d] mt-0.5">{hardwareRecommendation.why}</p>
+                  </div>
+                </div>
+              )}
+              {hardwareRecommendation && hardwareWiring.length > 0 && (
+                <div className="bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg p-3 text-[11px] text-[#166534]">
+                  <span className="font-medium">AI-recommended hardware:</span> {hardwareRecommendation.why}
+                </div>
+              )}
 
               {/* Board picker */}
               <div>
@@ -1072,8 +1239,34 @@ export default function SandboxBuilder({
                 {genHardwareLoading ? "Generating Wiring..." : "Generate Hardware Wiring"}
               </button>
 
+              {/* Wiring table — show connections list */}
+              {hardwareWiring.length > 0 && (
+                <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#64748b] mb-2">Connections</p>
+                  <div className="space-y-2">
+                    {hardwareWiring.map((item, i) => (
+                      <div key={i} className="bg-white border border-[#e2e8f0] rounded-lg p-2.5">
+                        <p className="font-semibold text-xs text-[#0f172a] mb-1">{item.component}</p>
+                        <div className="space-y-0.5">
+                          {item.connections.map((conn, j) => {
+                            const parts = conn.split("→").map((s) => s.trim());
+                            return (
+                              <div key={j} className="flex items-center gap-2 text-[11px]">
+                                <span className="font-mono text-[#ec4899] font-medium">{parts[0]}</span>
+                                <span className="text-[#94a3b8]">→</span>
+                                <span className="font-mono text-[#64748b]">{parts[1] || ""}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* BreadboardSimulator — show whenever we have a board + sensors */}
-              {selectedBoardName && (
+              {selectedBoardName && hardwareWiring.length > 0 && (
                 <BreadboardSimulator
                   boardName={selectedBoardName}
                   sensors={hardwareSensors.map((id) => sensorDisplayName(id))}

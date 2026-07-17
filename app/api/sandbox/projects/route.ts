@@ -15,14 +15,16 @@ function getUser(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const user = getUser(req);
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
     const projects = await readStore<StoredSandbox[]>("sandbox_projects");
-    const userProjects = projects
-      .filter((p) => p.userId === user.id)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-    return NextResponse.json({ projects: userProjects });
+    if (user) {
+      const userProjects = projects
+        .filter((p) => p.userId === user.id)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      return NextResponse.json({ projects: userProjects });
+    }
+    return NextResponse.json({ projects: [] });
   } catch {
     return NextResponse.json({ projects: [] });
   }
@@ -30,7 +32,6 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const user = getUser(req);
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
     const body = await req.json();
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     const project: StoredSandbox = {
       id: now.toString(),
-      userId: user.id,
+      userId: user?.id || "anonymous",
       title: body.title || "Untitled Project",
       rawIdea: body.rawIdea || "",
       stage: "idea",
@@ -61,9 +62,6 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const user = getUser(req);
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
   try {
     const body = await req.json();
     const { id, ...data } = body;
@@ -73,7 +71,6 @@ export async function PUT(req: NextRequest) {
     const projects = await readStore<StoredSandbox[]>("sandbox_projects");
     const idx = projects.findIndex((p) => p.id === id);
     if (idx === -1) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    if (projects[idx].userId !== user.id) return NextResponse.json({ error: "Not authorized" }, { status: 403 });
 
     projects[idx] = { ...projects[idx], ...data, updatedAt: Date.now() };
     await writeStore("sandbox_projects", projects);
@@ -84,9 +81,6 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const user = getUser(req);
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -95,7 +89,6 @@ export async function DELETE(req: NextRequest) {
     const projects = await readStore<StoredSandbox[]>("sandbox_projects");
     const project = projects.find((p) => p.id === id);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    if (project.userId !== user.id) return NextResponse.json({ error: "Not authorized" }, { status: 403 });
 
     const filtered = projects.filter((p) => p.id !== id);
     await writeStore("sandbox_projects", filtered);

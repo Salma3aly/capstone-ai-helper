@@ -34,6 +34,14 @@ DATA LOGGING REQUIREMENTS (always include):
    - Arduino: "Tools > Serial Monitor > copy/paste or use Serial Plotter"
    - Include a comment with a Python pyserial script snippet for logging
 
+ACTUATOR SAFETY CHECK — mandatory before returning:
+1. Identify if any selected component is an actuator (motor, pump, solenoid valve, relay-driven load, etc.).
+2. For each such actuator, determine its typical current draw. If it could exceed the microcontroller's per-pin/output limit (~20-40mA for most boards):
+   - Insert a suitable driver stage (relay module, MOSFET, or transistor + flyback diode for inductive loads) between the microcontroller pin and the actuator.
+   - Reflect the driver component in the wiring entry (e.g. "Motor Driver Module IN → Pin 9" and "Motor Driver Module OUT → Pump +", not "Pump IN → Pin 9").
+   - List the driver as if it were a separate component with its own connections, even if the user did not explicitly select it.
+3. If a low-current actuator is used that is within the pin's safe limit (e.g. a 5V mini pump connected via a driver-equipped module), state the estimated current draw and confirm safety in a comment instead of omitting the check.
+
 Return ONLY raw JSON. No markdown, no backticks, no explanation.
 
 Format:
@@ -105,6 +113,12 @@ Idea: "${idea}"
 Components:
 ${components}
 
+Hard rules:
+
+1. Every node in your "nodes" array must appear somewhere in the rendered diagram. The diagram is built directly from these nodes — do not use generic/placeholder labels like "Data Ingestion", "Filter Engine", "Filter DB", "Output Generator", "Data Source DB", or "User DB" unless those are literally the names of components from the project context above. Instead, derive each node's label from the actual pages, data models, services, and integrations in the Components section above.
+
+2. Consistency check before returning: every node id referenced in "edges" (in the "from" or "to" fields) must exist in the "nodes" array. If you find a mismatch, repair it before returning rather than sending broken JSON.
+
 Return ONLY raw JSON as a wiring diagram. No markdown, no backticks, no explanation.
 
 Format:
@@ -123,21 +137,40 @@ Format:
 }`;
 }
 
-export function buildCodePrompt(idea: string, wiring: string): string {
-  return `You are a senior full-stack developer generating a complete project scaffold. Based on the idea and architecture below, generate all the files for a working project.
+export function buildCodePrompt(
+  idea: string,
+  analysis: string,
+  components: string,
+  wiring: string
+): string {
+  return `You are a senior full-stack developer generating a complete project scaffold. You will receive the full project context as JSON below. You must generate code that is 100% consistent with that context — never substitute your own defaults.
 
-Idea: "${idea}"
+Full project context:
+${JSON.stringify({ idea, analysis: JSON.parse(analysis), components: JSON.parse(components), wiring: JSON.parse(wiring) }, null, 2)}
 
-Architecture:
-${wiring}
+Hard rules — do not violate these:
 
-Rules:
-- Generate REAL, working code — not templates or placeholders
-- Include proper imports, error handling, and basic styling
-- Use Next.js App Router (React) for frontend pages
-- Use simple file-based storage or SQLite for backend (no external DB setup needed)
-- Include a README with setup and run instructions
-- Every file must be complete and functional
+1. Stack must match exactly. Use the database from components.stack.database verbatim. If it says PostgreSQL, generate PostgreSQL code (e.g. pg client / Prisma), not SQLite, and vice versa. Never silently swap the database engine.
+
+2. Every data model must be implemented. For each entry in components.data_models, generate a real table/schema with every field listed (including timestamps, foreign keys, etc.) and at least one function to create/read it. Do not drop, merge, or simplify models — if data_models has 3 models, the generated code must have 3 corresponding tables/schemas.
+
+3. Match the framework's actual conventions. If frontend is Next.js 13+ with app/ directory:
+   - Use App Router convention
+   - layout.tsx must return plain <html><body>{children}</body></html> — never import from next/document (that's Pages Router only, it will fail to build)
+   - Any file using useState, useEffect, useRouter, or other client hooks in app/ directory MUST start with 'use client' as the first line
+   - Do not mix Pages Router and App Router APIs in the same project
+
+4. No duplicate top-level resources. Database/client connections must be initialized once in a single shared module (e.g. lib/db.ts) and imported everywhere else. Never open a second independent connection in another file.
+
+5. No top-level await unless the target Node/TS config supports it. If you use it, also emit the required tsconfig.json / package.json "type" settings needed to make it valid. Otherwise wrap initialization in an async init() function called explicitly.
+
+6. README must be generated once. Do not append or duplicate. Regenerate it fully from the current context; it should reflect the actual final file list and actual scripts in package.json.
+
+Self-check before returning:
+- Does every model in data_models appear in the generated schema?
+- Does the database dependency in package.json match components.stack.database?
+- Would npm install && npm run dev actually start without a build error?
+- Is the README generated fresh, not appended/duplicated?
 
 Return ONLY raw JSON. No markdown, no backticks, no explanation.
 
@@ -145,9 +178,9 @@ Format:
 {
   "files": [
     { "path": "package.json", "content": "..." },
-    { "path": "app/page.tsx", "content": "..." },
     { "path": "app/layout.tsx", "content": "..." },
-    { "path": "lib/store.ts", "content": "..." },
+    { "path": "app/page.tsx", "content": "..." },
+    { "path": "lib/db.ts", "content": "..." },
     { "path": "README.md", "content": "..." }
   ],
   "readme": "Full README content"

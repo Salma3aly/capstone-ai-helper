@@ -1,5 +1,43 @@
 import { NextResponse } from "next/server";
 import { grokChatJSON } from "@/lib/sandbox/grok";
+import { extractMetadataFromDoiOrTitle } from "@/lib/citation/metadataFetcher";
+
+function buildSearchQueryFromUrl(parsedUrl: URL, hostname: string): string {
+  const isCran = /cran/i.test(hostname);
+  if (isCran) {
+    const pkg = parsedUrl.searchParams.get("package");
+    if (pkg) return pkg;
+  }
+  const segments = parsedUrl.pathname.replace(/\/$/, "").split("/").filter(Boolean);
+  const meaningful = segments.filter(
+    (s) => !/^(index|article|view|download|paper|pdf)$/i.test(s) && !/^\d+$/.test(s)
+  );
+  const candidate = meaningful
+    .map((s) => s.replace(/[-_]/g, " "))
+    .join(" ")
+    .trim();
+  if (candidate.length >= 4) return candidate;
+  const hostParts = hostname.replace(/^(www|beta|dev)\./i, "").split(".");
+  const mainDomain = hostParts.slice(0, hostParts.length - 1).join(" ");
+  return mainDomain;
+}
+
+function cleanString(s: any): string {
+  if (!s || typeof s !== "string") return "";
+  const cleaned = s.trim();
+  const lower = cleaned.toLowerCase();
+  if (lower === "n/a" || lower === "none" || lower === "unknown" || lower === "null" || lower === "undefined") {
+    return "";
+  }
+  return cleaned;
+}
+
+function cleanAuthors(arr: any): string[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((a) => (typeof a === "string" ? a.trim() : ""))
+    .filter((a) => a && !/^(n\/a|none|unknown|null|undefined)$/i.test(a));
+}
 
 function extractMetaField(html: string, patterns: RegExp[]): string {
   for (const re of patterns) {
@@ -9,8 +47,25 @@ function extractMetaField(html: string, patterns: RegExp[]): string {
   return "";
 }
 
-function extractMetaArray(html: string, pattern: RegExp): string[] {
-  return [...html.matchAll(pattern)].map((m) => m[1].trim()).filter(Boolean);
+function extractMetaTags(html: string): Record<string, string[]> {
+  const meta: Record<string, string[]> = {};
+  const matches = html.matchAll(/<meta\s+([^>]+)>/gi);
+  for (const m of matches) {
+    const attrs = m[1];
+    const nameMatch = attrs.match(/(?:name|property)=["']([^"']+)["']/i);
+    const contentMatch = attrs.match(/content=["']([^"']+)["']/i);
+    if (nameMatch && contentMatch) {
+      const name = nameMatch[1].toLowerCase();
+      const content = contentMatch[1]
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .trim();
+      if (!meta[name]) meta[name] = [];
+      meta[name].push(content);
+    }
+  }
+  return meta;
 }
 
 function parseJSONLD(html: string): { authors: string[]; pubDate: string } {
@@ -27,7 +82,7 @@ function parseJSONLD(html: string): { authors: string[]; pubDate: string } {
         if (item.author) {
           const itemAuthors = Array.isArray(item.author) ? item.author : [item.author];
           for (const a of itemAuthors) {
-            const name = a.name || (a.givenName && a.familyName ? `${a.givenName} ${a.familyName}` : a.givenName || a.familyName || "");
+            const name = typeof a === "string" ? a : (a?.name || (a?.givenName && a?.familyName ? `${a.givenName} ${a.familyName}` : a?.givenName || a?.familyName || ""));
             if (name && !authors.includes(name)) authors.push(name);
           }
         }
@@ -40,42 +95,81 @@ function parseJSONLD(html: string): { authors: string[]; pubDate: string } {
   return { authors, pubDate };
 }
 
-type ScrapeResult = { title: string; siteName: string; authors: string[]; pubDate: string };
+type ScrapeResult = { title: string; siteName: string; authors: string[]; pubDate: string; volume?: string; issue?: string; pages?: string; doi?: string };
 
 function tryExtractMeta(html: string): ScrapeResult | null {
+  const meta = extractMetaTags(html);
+
+  const getMeta = (keys: string[]): string => {
+    for (const key of keys) {
+      const val = meta[key.toLowerCase()]?.[0];
+      if (val) return val;
+    }
+    return "";
+  };
+
+  const getAllMeta = (keys: string[]): string[] => {
+    const list: string[] = [];
+    for (const key of keys) {
+      const vals = meta[key.toLowerCase()];
+      if (vals) {
+        for (const val of vals) {
+          if (!list.includes(val)) list.push(val);
+        }
+      }
+    }
+    return list;
+  };
+
   const title =
-    extractMetaField(html, [
-      /<meta\s+property=["']og:title["'][^>]*content=["']([^"']+)["']/i,
-      /<meta\s+name=["']twitter:title["'][^>]*content=["']([^"']+)["']/i,
-      /<title>([^<]+)<\/title>/i,
-      /<meta\s+name=["']title["'][^>]*content=["']([^"']+)["']/i,
-    ]) || extractMetaField(html, [/<h1[^>]*>([^<]+)<\/h1>/i]);
+    getMeta(["og:title", "twitter:title", "title"]) ||
+    extractMetaField(html, [/<title>([^<]+)<\/title>/i]) ||
+    extractMetaField(html, [/<h1[^>]*>([^<]+)<\/h1>/i]);
 
-  const siteName = extractMetaField(html, [
-    /<meta\s+property=["']og:site_name["'][^>]*content=["']([^"']+)["']/i,
-    /<meta\s+name=["']application-name["'][^>]*content=["']([^"']+)["']/i,
-  ]);
+  const siteName = getMeta(["og:site_name", "application-name"]);
 
-  const authors = extractMetaArray(html, /<meta\s+name=["']citation_author["'][^>]*content=["']([^"']+)["']/gi);
+  const authors = getAllMeta(["citation_author"]);
   if (authors.length === 0) {
-    const author = extractMetaField(html, [
-      /<meta\s+name=["']author["'][^>]*content=["']([^"']+)["']/i,
-      /<meta\s+name=["']twitter:creator["'][^>]*content=["']([^"']+)["']/i,
-    ]);
-    if (author) authors.push(author);
+    const author = getMeta(["author", "creator", "twitter:creator"]);
+    if (author) {
+      // CRAN/software pages often list multiple authors with role annotations in one meta tag
+      // e.g. "Mahdi Teimouri [aut, cre], Adel Mohammadpour [aut], Saralees Nadarajah [aut]"
+      if (/\[.*?\]/.test(author) && author.includes(",")) {
+        const split = author
+          .replace(/\[.*?\]/g, "")     // strip [aut, cre] etc
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+        authors.push(...split);
+      } else {
+        authors.push(author);
+      }
+    }
   }
 
-  const pubDate = extractMetaField(html, [
-    /<meta\s+property=["']article:published_time["'][^>]*content=["']([^"']+)["']/i,
-    /<meta\s+name=["']citation_date["'][^>]*content=["']([^"']+)["']/i,
-    /<meta\s+name=["']date["'][^>]*content=["']([^"']+)["']/i,
-    /<meta\s+property=["']book:release_date["'][^>]*content=["']([^"']+)["']/i,
-  ]);
+  const pubDate = getMeta(["article:published_time", "citation_date", "date", "book:release_date"]);
+  const volume = getMeta(["citation_volume"]);
+  const issue = getMeta(["citation_issue"]);
+
+  const firstpage = getMeta(["citation_firstpage"]);
+  const lastpage = getMeta(["citation_lastpage"]);
+  const pages = firstpage && lastpage ? `${firstpage}-${lastpage}` : (firstpage || "");
+
+  const doi = getMeta(["citation_doi"]);
 
   const ld = parseJSONLD(html);
   for (const a of ld.authors) {
     if (!authors.includes(a)) authors.push(a);
   }
+
+  // Fallback: regex-based author extraction for CRAN/JSTOR/software pages
+  if (authors.length === 0) {
+    const authorHtml = extractAuthorsFromHtml(html);
+    for (const a of authorHtml) {
+      if (!authors.includes(a)) authors.push(a);
+    }
+  }
+
   const finalPubDate = pubDate || ld.pubDate;
 
   if (title || siteName || authors.length > 0 || finalPubDate) {
@@ -84,9 +178,61 @@ function tryExtractMeta(html: string): ScrapeResult | null {
       siteName: siteName || "",
       authors,
       pubDate: finalPubDate ? finalPubDate.slice(0, 10) : "",
+      volume: volume || "",
+      issue: issue || "",
+      pages: pages || "",
+      doi: doi || "",
     };
   }
   return null;
+}
+
+/** Fallback: extract author names from CRAN/JSTOR/software page HTML structures */
+function extractAuthorsFromHtml(html: string): string[] {
+  const result: string[] = [];
+
+  // Pattern 1: CRAN-style table row: <td>Author(s):</td><td>Name [aut], Name [aut]</td>
+  const tablePattern = /Author\s*\(?s?\)?\s*:\s*<\/t[dh]>\s*<t[dh][^>]*>\s*([^<]+(?:\s*<br\s*\/?>\s*[^<]*)*)/i;
+  const tableMatch = html.match(tablePattern);
+  if (tableMatch) {
+    const raw = tableMatch[1]
+      .replace(/<br\s*\/?>/gi, ",")
+      .replace(/\[.*?\]/g, "")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+    const names = raw.split(",").map((n) => n.trim().replace(/\s+/g, " ")).filter(Boolean);
+    for (const n of names) {
+      if (n.length > 2 && !n.includes(":") && !/^https?:\/\//i.test(n)) {
+        result.push(n);
+      }
+    }
+    if (result.length > 0) return result;
+  }
+
+  // Pattern 2: CRAN definition list: <dt>Author(s):</dt><dd>Names</dd>
+  const dlPattern = /Author\s*\(?s?\)?\s*:\s*<\/dt>\s*<dd[^>]*>\s*([^<]+)/i;
+  const dlMatch = html.match(dlPattern);
+  if (dlMatch) {
+    const raw = dlMatch[1].replace(/\[.*?\]/g, "").trim();
+    const names = raw.split(",").map((n) => n.trim()).filter(Boolean);
+    for (const n of names) {
+      if (n.length > 2) result.push(n);
+    }
+    if (result.length > 0) return result;
+  }
+
+  // Pattern 3: Plain "Author(s):" or "Created by:" label followed by text
+  const labelPattern = /(?:Author\(?s?\)?\s*:\s*|Created\s+by\s*:\s*|By\s*:\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]*\.?\s*)+(?:,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]*\.?\s*)*)*)/g;
+  let labelMatch;
+  while ((labelMatch = labelPattern.exec(html)) !== null) {
+    const raw = labelMatch[1].replace(/\[.*?\]/g, "").trim();
+    if (raw.length > 2 && !raw.startsWith("http")) {
+      result.push(raw);
+    }
+  }
+  if (result.length > 0) return result;
+
+  return result;
 }
 
 /** Detect if page content is an error / directory listing / non-article page */
@@ -138,7 +284,9 @@ function titleFromUrlPath(pathname: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { url } = await req.json();
+    const body: any = await req.json();
+    const { url } = body;
+    const userTitle: string | undefined = body.title;
 
     if (!url || typeof url !== "string" || !url.trim()) {
       return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -161,6 +309,7 @@ export async function POST(req: Request) {
     // Fetch the page
     let html = "";
     let fetchFailed = false;
+    let fetchStatus = 0;
     try {
       const res = await fetch(cleanUrl, {
         headers: {
@@ -177,12 +326,16 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(15000),
         redirect: "follow",
       });
+      fetchStatus = res.status;
       if (res.ok) {
         html = await res.text();
+      } else {
+        console.error(`Citation scrape: HTTP ${res.status} ${res.statusText} for ${cleanUrl}`);
+        fetchFailed = true;
       }
-    } catch {
+    } catch (err: any) {
       fetchFailed = true;
-      console.warn("Citation scrape: fetch failed for", cleanUrl);
+      console.error(`Citation scrape: fetch exception for ${cleanUrl} — ${err?.message || err}`);
     }
 
     // If the page is an error/directory listing, don't use its content
@@ -190,19 +343,91 @@ export async function POST(req: Request) {
       html = ""; // clear so we only use URL-based fallback
     }
 
-    // Try extracting from meta tags first
+    // Step 1: Extract from meta tags (gives us baseline data + possible DOI)
     const metaResult = tryExtractMeta(html);
-    if (metaResult && metaResult.title && metaResult.authors.length > 0 && metaResult.pubDate) {
-      return NextResponse.json(metaResult);
+
+    // Step 2: Build CRAN DOI from URL if applicable
+    let doi = metaResult?.doi || "";
+    if (!doi && /cran/i.test(hostname)) {
+      const pkg = parsedUrl.searchParams.get("package");
+      if (pkg) doi = `10.32614/CRAN.package.${pkg}`;
     }
 
-    // Try LLM if we have meaningful HTML
-    const needsLLM = metaResult ? (metaResult.authors.length === 0 || !metaResult.pubDate || !metaResult.title) : true;
-    if (needsLLM && html && html.length > 200) {
+    // Step 3: Try Crossref immediately (same order as PDF pipeline)
+    let title = metaResult?.title || userTitle || titleFromUrlPath(parsedUrl.pathname) || "";
+    // When fetch failed, build a higher-quality search query from the URL
+    const fallbackTitle = title || buildSearchQueryFromUrl(parsedUrl, hostname) || "";
+    if (fetchFailed && fallbackTitle) {
+      console.error(`Citation scrape: fetch failed for ${cleanUrl}, using Crossref search with query: "${fallbackTitle}"`);
+    }
+    let crossrefData = await extractMetadataFromDoiOrTitle(doi || metaResult?.doi, fallbackTitle || title);
+    if (!crossrefData) {
+      console.error(`Citation scrape: Crossref returned no data for ${hostname} (query: "${fallbackTitle}")`);
+    } else {
+      console.error(`Citation scrape: Crossref returned data for ${hostname} — title="${crossrefData.title}", authors=${crossrefData.authors.length}`);
+    }
+
+    // Step 4: Establish baseline — Crossref takes precedence, meta fills gaps
+    let siteName = "";
+    let authors: string[] = [];
+    let pubDate = "";
+    let volume = "";
+    let issue = "";
+    let pages = "";
+
+    if (crossrefData) {
+      if (crossrefData.title && crossrefData.title !== "Unknown Title") title = crossrefData.title;
+      if (crossrefData.authors && crossrefData.authors.length > 0) authors = crossrefData.authors;
+      if (crossrefData.journal) siteName = crossrefData.journal;
+      if (crossrefData.volume) volume = crossrefData.volume;
+      if (crossrefData.issue) issue = crossrefData.issue;
+      if (crossrefData.pages) pages = crossrefData.pages;
+      if (crossrefData.year) pubDate = crossrefData.year;
+      if (crossrefData.doi) doi = crossrefData.doi;
+    }
+    // Meta fills any gaps Crossref left empty
+    if (!title) title = metaResult?.title || titleFromUrlPath(parsedUrl.pathname) || "";
+    if (!siteName) siteName = metaResult?.siteName || hostname;
+    if (authors.length === 0) authors = metaResult?.authors || [];
+    if (!pubDate) pubDate = metaResult?.pubDate || "";
+    if (!volume) volume = metaResult?.volume || "";
+    if (!issue) issue = metaResult?.issue || "";
+    if (!pages) pages = metaResult?.pages || "";
+    if (!doi) doi = metaResult?.doi || "";
+
+    // CRAN-specific: fetch DESCRIPTION file for reliable author/year extraction
+    if (authors.length === 0 && /cran/i.test(hostname)) {
+      const pkg = parsedUrl.searchParams.get("package");
+      if (pkg) {
+        try {
+          const descRes = await fetch(`https://cran.r-project.org/web/packages/${pkg}/DESCRIPTION`);
+          if (descRes.ok) {
+            const desc = await descRes.text();
+            // Parse Author line — strip [aut, cre] roles, split by comma
+            const authorMatch = desc.match(/^Author:\s*(.+)$/m);
+            if (authorMatch) {
+              const raw = authorMatch[1].replace(/\[.*?\]/g, "").trim();
+              const names = raw.split(",").map((n) => n.trim().replace(/\s+/g, " ")).filter(Boolean);
+              if (names.length > 0) authors = names;
+            }
+            // Parse Year from Date/Publication entry
+            if (!pubDate) {
+              const dateMatch = desc.match(/^Date\/Publication:\s*(\d{4})/m) || desc.match(/^Packaged:\s*(\d{4})/m);
+              if (dateMatch) pubDate = dateMatch[1];
+            }
+          }
+        } catch (cranErr: any) {
+          console.error(`Citation scrape: CRAN DESCRIPTION fetch failed for ${pkg} — ${cranErr?.message || cranErr}`);
+        }
+      }
+    }
+
+    // Step 5: Run LLM only for fields still missing (same conditional as PDF pipeline)
+    let fallbackDate = "";
+    if (html && html.length > 200) {
       const text = htmlToText(html).slice(0, 6000);
       const snippet = text.replace(/[ \t]+/g, " ").slice(0, 4000);
 
-      // Try to extract date from raw HTML/URL using regex as fallback
       const dateRegexes = [
         /(?:published|date|created|received|accepted|submitted)[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})/i,
         /(\d{4}[-/]\d{1,2}[-/]\d{1,2})/,
@@ -211,7 +436,6 @@ export async function POST(req: Request) {
         /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}/,
         /\/(\d{4})\/(?:0[1-9]|1[0-2])\//,
       ];
-      let fallbackDate = "";
       for (const re of dateRegexes) {
         const m = snippet.match(re);
         if (m) {
@@ -220,71 +444,86 @@ export async function POST(req: Request) {
         }
       }
 
-      const prompt = `You are an academic citation metadata parser.
-Given the URL and page text below, extract:
-- title: the article or page title
-- siteName: website or publication name
-- authors: array of author names (look for bylines, credit lines, or author sections — empty array if none found)
-- pubDate: publication date in YYYY-MM-DD format (look for date stamps near the title/byline — find any date, even if it looks like "${fallbackDate}", convert it to YYYY-MM-DD; empty string if not found)
+      const missingFields: string[] = [];
+      if (!title) missingFields.push("title");
+      if (!siteName) missingFields.push("siteName");
+      if (!authors || authors.length === 0) missingFields.push("authors");
+      if (!volume) missingFields.push("volume");
+      if (!issue) missingFields.push("issue");
+      if (!pages) missingFields.push("pages");
+      if (!doi) missingFields.push("doi");
+      if (!pubDate) missingFields.push("pubDate");
 
-Focus especially on finding the **author names** and **publication date** from the page header area, byline, or metadata.
-If you are unsure about pubDate but see something like "${fallbackDate}" in the text, use that rather than returning empty.
-Return ONLY raw JSON matching: {"title": "...", "siteName": "...", "authors": [...], "pubDate": "..."}
+      if (missingFields.length > 0) {
+        const hasExisting = crossrefData || title || siteName || authors.length > 0 || pubDate || volume || issue || pages || doi;
+        const hint = hasExisting
+          ? `We already have partial data from Crossref/meta:\n${JSON.stringify({ title, siteName, authors, pubDate, volume, issue, pages, doi }, null, 2)}\n\nFill in the missing fields: ${missingFields.join(", ")}.`
+          : `Extract ALL metadata fields thoroughly.`;
 
-URL: "${cleanUrl}"
-Domain: "${hostname}"
+        const prompt = `You are an academic citation metadata parser.
+Given the page text below, ${hint}
+
+- title: the article, software package, or page title
+- siteName: FULL journal name, publication name, or software repository (e.g. "Current Opinion in Solid State and Materials Science", "CRAN")
+- authors: EVERY single author/creator name as a complete array, in "FirstName LastName" format. For software packages, look in "Author(s):" or "Created by" sections and strip role annotations like [aut, cre]. List ALL of them.
+- pubDate: publication year only, as a 4-digit string (e.g. "2025")
+- volume: journal volume number as a string (e.g. "35"), leave empty for software packages
+- issue: journal issue/number as a string (e.g. "2"), leave empty for software packages
+- pages: page range or article number as a string (e.g. "101218"), leave empty for software packages
+- doi: DOI identifier (e.g. "10.1016/j.cossms.2025.101218" or "10.32614/CRAN.package.Weighted.Desc.Stat")
+
+Be thorough.
+
+Return ONLY raw JSON matching: {"title": "...", "siteName": "...", "authors": [...], "pubDate": "2025", "volume": "35", "issue": "2", "pages": "101218", "doi": "10.1016/..."}
+
+If you are unsure about pubDate but find something like "${fallbackDate}" in the text, use the year from that rather than returning empty.
 
 Page text:
 ${snippet}`;
 
-      try {
-        const data = await grokChatJSON<ScrapeResult>(
-          [{ role: "user", content: prompt }],
-          "llama-3.3-70b-versatile",
-          2048
-        );
+        try {
+          const data = await grokChatJSON<ScrapeResult>(
+            [{ role: "user", content: prompt }],
+            "llama-3.3-70b-versatile",
+            2048
+          );
 
-        // Validate: reject obviously wrong titles (error messages, too short, etc.)
-        const junkTitles = ["there are no readable files", "index of", "403 forbidden", "404 not found", "access denied", "error", "page not found"];
-        const isValid = data.title && data.title.length > 5 && !junkTitles.some((j) => data.title.toLowerCase().includes(j));
-
-        let llmPubDate = data.pubDate || "";
-        if (!llmPubDate && fallbackDate) {
-          const d = new Date(fallbackDate);
-          if (!isNaN(d.getTime())) {
-            llmPubDate = d.toISOString().slice(0, 10);
-          } else {
-            llmPubDate = fallbackDate.replace(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/, "$1-$2-$3");
-          }
+          if (data.title && !title) title = data.title;
+          if (data.siteName && !siteName) siteName = data.siteName;
+          if (data.authors && data.authors.length > 0 && authors.length === 0) authors = data.authors;
+          if (data.volume && !volume) volume = data.volume;
+          if (data.issue && !issue) issue = data.issue;
+          if (data.pages && !pages) pages = data.pages;
+          if (data.doi && !doi) doi = data.doi;
+          if (data.pubDate && !pubDate) pubDate = data.pubDate;
+        } catch {
+          // LLM failed — keep whatever Crossref/meta gave us
         }
-        return NextResponse.json({
-          title: isValid ? data.title : (metaResult?.title || titleFromUrlPath(parsedUrl.pathname)),
-          siteName: data.siteName || metaResult?.siteName || hostname,
-          authors: Array.isArray(data.authors) && data.authors.length > 0 ? data.authors : (metaResult?.authors || []),
-          pubDate: llmPubDate || metaResult?.pubDate || "",
-        });
-      } catch {
-        // LLM failed, fall through to URL-based fallback
-        console.warn("LLM extraction failed for", cleanUrl);
       }
     }
 
-    // Fallback: use what we have from meta or URL path
-    const title = metaResult?.title || titleFromUrlPath(parsedUrl.pathname) || "";
-    const siteName = metaResult?.siteName || hostname;
+    // Fallback date from regex if still missing
+    if (!pubDate && fallbackDate) {
+      const m = fallbackDate.match(/\b(20\d{2})\b/);
+      if (m) pubDate = m[0];
+    }
 
     if (title || siteName) {
       return NextResponse.json({
-        title,
-        siteName,
-        authors: metaResult?.authors || [],
-        pubDate: metaResult?.pubDate || "",
+        title: cleanString(title) || "",
+        siteName: cleanString(siteName) || "",
+        authors: cleanAuthors(authors),
+        pubDate: cleanString(pubDate),
+        volume: cleanString(volume) || "",
+        issue: cleanString(issue) || "",
+        pages: cleanString(pages) || "",
+        doi: cleanString(doi) || "",
       });
     }
 
     // Nothing found at all
     const msg = fetchFailed
-      ? `Could not connect to ${hostname}. The site may be blocking automated requests.`
+      ? `Could not connect to ${hostname}. The site may be blocking automated requests.${fallbackTitle ? ` Crossref search for "${fallbackTitle}" returned no results. Try providing a more specific title.` : ""}`
       : "This page doesn't appear to be a research article or web page with citation metadata.";
     return NextResponse.json({ error: msg }, { status: 422 });
   } catch (error) {
