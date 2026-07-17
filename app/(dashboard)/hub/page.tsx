@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import Pusher from "pusher-js";
 import { useAuth } from "@/lib/context/AuthContext";
-import { Hash, Send, Plus, Users, UserCheck, BookOpen, MessageSquare, ExternalLink, X } from "lucide-react";
+import { Hash, Send, Plus, Users, BookOpen, MessageSquare, ExternalLink, X } from "lucide-react";
 
 interface Message {
   id: string;
@@ -20,12 +21,6 @@ interface Channel {
   description: string;
 }
 
-interface OnlineUser {
-  name: string;
-  title: string;
-  online: boolean;
-}
-
 const DEFAULT_CHANNELS: Channel[] = [
   { id: "general", name: "general", description: "General capstone discussions" },
   { id: "electronics-help", name: "electronics-help", description: "Troubleshoot sensors, wiring & code" },
@@ -41,11 +36,12 @@ export default function HubPage() {
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [creating, setCreating] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const subscribedRef = useRef(new Set<string>());
+  const pusherRef = useRef<any>(null);
 
   const loadHubData = async (silent = false) => {
     try {
@@ -63,44 +59,55 @@ export default function HubPage() {
     loadHubData();
   }, []);
 
+  // Set up Pusher connection
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
+    const key = process.env.NEXT_PUBLIC_PUSHER_KEY;
+    const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "us2";
+    if (!key) return;
 
-    const connect = () => {
-      try {
-        ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002");
-        ws.onopen = () => {
-          ws?.send(JSON.stringify({ type: "join", userName: user?.name || "Anonymous", userEmail: user?.email || "" }));
-        };
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === "new_message") {
-              setMessages((prev) => prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]);
-            } else if (data.type === "channel_created") {
-              loadHubData(true);
-            } else if (data.type === "presence") {
-              setOnlineUsers(data.users || []);
-            }
-          } catch {}
-        };
-        ws.onclose = () => { reconnectTimer = setTimeout(connect, 5000); };
-        ws.onerror = () => { ws?.close(); };
-      } catch {
-        reconnectTimer = setTimeout(connect, 5000);
-      }
+    const pusher = new Pusher(key, { cluster });
+    pusherRef.current = pusher;
+
+    // Global channel for channel-created events
+    const globalChannel = pusher.subscribe("hub-global");
+    globalChannel.bind("channel-created", (data: Channel) => {
+      setChannels((prev) => {
+        if (prev.some((c) => c.id === data.id)) return prev;
+        return [...prev, data];
+      });
+    });
+
+    const subscribeToChan = (chanId: string) => {
+      if (subscribedRef.current.has(chanId)) return;
+      subscribedRef.current.add(chanId);
+      const channel = pusher.subscribe(`hub-${chanId}`);
+      channel.bind("new-message", (msg: Message) => {
+        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      });
     };
 
-    connect();
+    channels.forEach((c) => subscribeToChan(c.id));
 
-    const interval = setInterval(() => loadHubData(true), 15000);
     return () => {
-      clearInterval(interval);
-      clearTimeout(reconnectTimer);
-      ws?.close();
+      pusher.disconnect();
+      pusherRef.current = undefined;
+      subscribedRef.current.clear();
     };
-  }, [user]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Watch for new channels added after mount and subscribe to them
+  useEffect(() => {
+    const pusher = pusherRef.current;
+    if (!pusher) return;
+    channels.forEach((c) => {
+      if (subscribedRef.current.has(c.id)) return;
+      subscribedRef.current.add(c.id);
+      const channel = pusher.subscribe(`hub-${c.id}`);
+      channel.bind("new-message", (msg: Message) => {
+        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      });
+    });
+  }, [channels]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -121,7 +128,7 @@ export default function HubPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": token ? `Bearer ${token}` : "",
+          Authorization: token ? `Bearer ${token}` : "",
         },
         body: JSON.stringify({ channelId: activeChannelId, content: text }),
       });
@@ -194,10 +201,6 @@ export default function HubPage() {
     });
   };
 
-  const activeUser = activeChannelId === "general"
-    ? onlineUsers
-    : onlineUsers.filter((u) => u.online);
-
   return (
     <div className="flex h-[calc(100vh-57px)] bg-[#f8fafc] overflow-hidden">
       {/* Left sidebar */}
@@ -232,24 +235,6 @@ export default function HubPage() {
                   <span className="truncate">{chan.name}</span>
                 </button>
               ))}
-            </div>
-          </div>
-
-          <div>
-            <span className="text-[10px] uppercase font-bold text-[#64748b] tracking-wider block mb-2">Online</span>
-            <div className="space-y-1.5">
-              {activeUser.length === 0 ? (
-                <p className="text-[10px] text-[#94a3b8] italic px-1">No one else is online</p>
-              ) : (
-                activeUser.map((u, i) => (
-                  <div key={i} className="flex items-center gap-2 px-1 py-1">
-                    <div className="relative">
-                      <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                    </div>
-                    <span className="text-[11px] text-[#475569] truncate">{u.name}</span>
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </div>
@@ -363,7 +348,7 @@ export default function HubPage() {
       <div className="w-64 border-l border-[#e2e8f0] bg-white p-4 space-y-5 hidden lg:flex flex-col overflow-y-auto shrink-0">
         <div>
           <div className="flex items-center justify-between mb-3">
-             <h4 className="font-bold text-xs text-[#0f172a] flex items-center gap-1.5 uppercase tracking-wider">
+            <h4 className="font-bold text-xs text-[#0f172a] flex items-center gap-1.5 uppercase tracking-wider">
               <BookOpen className="w-4 h-4 text-[#ec4899]" />
               Community Rules
             </h4>
