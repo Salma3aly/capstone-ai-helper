@@ -164,40 +164,27 @@ ${JSON.stringify({ idea, analysis: JSON.parse(analysis), components: JSON.parse(
 
 Hard rules — do not violate these:
 
-1. Build tool must match the framework. If frontend is "React / Next.js" or anything Next.js-related:
-   - package.json MUST include "next" as a dependency and use "next dev"/"next build" as scripts
-   - Do NOT use "react-scripts" (Create React App) — CRA doesn't support app/ directory or layout.tsx
-   - Include next.config.js (or .mjs or .ts)
-   - Use App Router convention (app/ directory with page.tsx, layout.tsx)
+1. Stack must match exactly. Use the database from components.stack.database verbatim. If it says PostgreSQL, generate PostgreSQL code (e.g. pg client / Prisma), not SQLite, and vice versa. Never silently swap the database engine.
 
-2. Never import native HTML elements. <html>, <body>, <head>, <meta>, <link> are native JSX elements — do not import them from any package. Never write "import { HTML } from 'html'" or anything similar.
+2. Every data model must be implemented. For each entry in components.data_models, generate a real table/schema with every field listed (including timestamps, foreign keys, etc.) and at least one function to create/read it. Do not drop, merge, or simplify models — if data_models has 3 models, the generated code must have 3 corresponding tables/schemas.
 
-3. Backend/API layer is REQUIRED when the stack specifies a backend. Do not skip it:
-   - Generate API route files under app/api/.../route.ts that handle all database operations
-   - lib/db.ts or equivalent database module is for SERVER-SIDE ONLY — never import it in a 'use client' component
-   - Client components ('use client') must fetch data from /api/* endpoints using fetch() — never import mysql2, pg, prisma, or any server-only package
-   - If the stack says "Node.js / Express" for backend, generate Express-like API routes that run server-side and expose REST endpoints the client calls
-   - The client sends HTTP requests to /api/...; the server routes handle DB queries and return JSON responses
+3. Match the framework's actual conventions. If frontend is Next.js 13+ with app/ directory:
+   - Use App Router convention
+   - layout.tsx must return plain <html><body>{children}</body></html> — never import from next/document (that's Pages Router only, it will fail to build)
+   - Any file using useState, useEffect, useRouter, or other client hooks in app/ directory MUST start with 'use client' as the first line
+   - Do not mix Pages Router and App Router APIs in the same project
 
-4. README must appear EXACTLY ONCE. It must be in the "readme" field of the JSON output AND as one file entry files[]. Do not duplicate: the "readme" field and the file entry for README.md should have identical content, but there must be exactly one README.md entry in the files array and one "readme" field — no second copy of the content appended anywhere.
+4. No duplicate top-level resources. Database/client connections must be initialized once in a single shared module (e.g. lib/db.ts) and imported everywhere else. Never open a second independent connection in another file.
 
-5. Every data model must be implemented. For each entry in components.data_models, generate a real table/schema with every field listed (including timestamps, foreign keys, etc.) and at least one function to create/read it. Do not drop, merge, or simplify models — if data_models has 3 models, the generated code must have 3 corresponding tables/schemas.
+5. No top-level await unless the target Node/TS config supports it. If you use it, also emit the required tsconfig.json / package.json "type" settings needed to make it valid. Otherwise wrap initialization in an async init() function called explicitly.
 
-6. No duplicate top-level resources. Database/client connections must be initialized once in a single shared server-only module (e.g. lib/db.ts) and imported only by server-side files (API routes, server components). Never open a second independent connection in another file.
+6. README must be generated once. Do not append or duplicate. Regenerate it fully from the current context; it should reflect the actual final file list and actual scripts in package.json.
 
-7. No top-level await unless the target Node/TS config supports it. If you use it, also emit the required tsconfig.json / package.json "type" settings needed to make it valid. Otherwise wrap initialization in an async init() function called explicitly.
-
-Self-check before returning — verify EVERY item:
-- [ ] Does package.json use "next" (not "react-scripts") when frontend is Next.js?
-- [ ] Does any file contain "import { HTML }" or similar impossible imports?
-- [ ] Is every 'use client' file free of server-only imports (mysql2, pg, prisma, fs, etc.)?
-- [ ] Are the database credentials only in server-side files, never in client components?
-- [ ] If the stack has a backend, are there API route files (app/api/*/route.ts) that sit between the client and the database?
-- [ ] Does every model in data_models appear as a table/schema?
-- [ ] Does the database dependency in package.json match components.stack.database?
-- [ ] Does the README content appear exactly once across the entire output?
-- [ ] Would npm install && npm run dev actually start without a build error?
-If any check fails, fix it before returning.
+Self-check before returning:
+- Does every model in data_models appear in the generated schema?
+- Does the database dependency in package.json match components.stack.database?
+- Would npm install && npm run dev actually start without a build error?
+- Is the README generated fresh, not appended/duplicated?
 
 Return ONLY raw JSON. No markdown, no backticks, no explanation.
 
@@ -205,13 +192,11 @@ Format:
 {
   "files": [
     { "path": "package.json", "content": "..." },
-    { "path": "next.config.js", "content": "..." },
     { "path": "app/layout.tsx", "content": "..." },
     { "path": "app/page.tsx", "content": "..." },
-    { "path": "app/api/.../route.ts", "content": "..." },
     { "path": "lib/db.ts", "content": "..." },
     { "path": "README.md", "content": "..." }
   ],
-  "readme": "Full README content (identical to the README.md file entry)"
+  "readme": "Full README content"
 }`;
 }
