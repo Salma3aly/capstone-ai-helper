@@ -131,28 +131,13 @@ function stripTrailingPeriod(s: string): string {
   return s.replace(/\.+$/, "");
 }
 
-/** Extract a clean site name from a URL domain (e.g. "https://www.elindependiente.com/..." → "El Independiente") */
-function extractDomain(url: string): string {
-  if (!url) return "";
-  try {
-    const hostname = new URL(url).hostname.replace(/^www\./i, "");
-    return hostname
-      .split(".")
-      .slice(0, -1) // remove TLD
-      .join(" ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  } catch {
-    return "";
-  }
-}
-
 export function formatCitation(source: Source, style: CitationStyle): string {
   const author = formatAuthors(source.authors, style);
   const title = source.title || "Untitled";
   const date = formatDate(source.pubDate || "");
 
-  // Derive site: use provided name, fall back to domain from URL, or empty
-  const rawSite = source.siteName || extractDomain(source.url) || "";
+  // Derive site: use provided name, or empty — never derive from hostname
+  const rawSite = source.siteName || "";
 
   // Build the site segment with leading/trailing punctuation for each style
   function siteSegment(prefix: string, suffix: string): string {

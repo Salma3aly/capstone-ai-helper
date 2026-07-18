@@ -180,7 +180,13 @@ export default function CitationPage() {
       setPages(data.pages || "");
       setDoi(data.doi || "");
 
-      setScrapeMsg("Successfully scraped page details!");
+      const hasTitle = !!data.title;
+      const hasAuthors = data.authors && data.authors.length > 0;
+      const hasSiteName = !!data.siteName;
+      const hasPubDate = !!data.pubDate;
+      const meaningful = hasTitle && (hasAuthors || hasSiteName || hasPubDate);
+      setScrapeMsg(meaningful ? "Successfully scraped page details!" : "Limited metadata found — please fill in missing fields manually.");
+      setIsSuccess(meaningful);
       setTimeout(() => setScrapeMsg(""), 4000);
     } catch (err: any) {
       setIsSuccess(false);

@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { grokChatJSON } from "@/lib/sandbox/grok";
 import { extractMetadataFromDoiOrTitle, extractAuthorsFromPdfText } from "@/lib/citation/metadataFetcher";
 
-/** Check if a URL path looks like a direct PDF file link */
-function isPdfUrl(pathname: string): boolean {
-  return /\.pdf$/i.test(pathname);
+/** Check if a URL looks like a direct PDF file link */
+function isPdfUrl(urlStr: string): boolean {
+  if (/\.pdf($|[?#])/i.test(urlStr)) return true;
+  try {
+    return /\.pdf$/i.test(new URL(urlStr).pathname);
+  } catch {
+    return false;
+  }
 }
 
 /** Extract filename (without .pdf) from a URL pathname */
@@ -529,7 +534,7 @@ export async function POST(req: Request) {
     const hostname = parsedUrl.hostname.replace(/^www\./i, "");
 
     // ─── PDF direct link detection ───
-    if (isPdfUrl(parsedUrl.pathname)) {
+    if (isPdfUrl(cleanUrl)) {
       try {
         const pdfRes = await fetch(cleanUrl, {
           headers: {
