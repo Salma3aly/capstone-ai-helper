@@ -2,6 +2,99 @@ import { NextResponse } from "next/server";
 import { grokChatJSON } from "@/lib/sandbox/grok";
 import { extractMetadataFromDoiOrTitle } from "@/lib/citation/metadataFetcher";
 
+/** Check if a URL path looks like a direct PDF file link */
+function isPdfUrl(pathname: string): boolean {
+  return /\.pdf$/i.test(pathname);
+}
+
+/** Extract filename (without .pdf) from a URL pathname */
+function pdfFilenameFromUrl(pathname: string): string {
+  const segments = pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+  const last = segments[segments.length - 1] || "";
+  return last.replace(/\.pdf$/i, "");
+}
+
+/** Check if a PDF title is generic/auto-generated (e.g. from MS Word) */
+function isGenericPdfTitle(title: string): boolean {
+  const lower = title.trim().toLowerCase();
+  if (!lower) return true;
+  if (/^microsoft\s+word\s*-/i.test(lower)) return true;
+  if (/^document\d*$/i.test(lower)) return true;
+  if (/^untitled$/i.test(lower)) return true;
+  return false;
+}
+
+/** Extract a 4-digit year from a URL pathname using regex */
+function extractYearFromUrl(pathname: string): string {
+  const match = pathname.match(/\/(\d{4})\//);
+  return match ? match[1] : "";
+}
+
+/** Parse PDF metadata and return a clean ScrapeResult — never hallucinates */
+async function parsePdfFromBuffer(buffer: Buffer, urlPathname: string): Promise<{
+  title: string; siteName: string; authors: string[]; pubDate: string;
+  volume: string; issue: string; pages: string; doi: string;
+}> {
+  try {
+    const { PDFParse } = await import("pdf-parse");
+    const parser = new PDFParse({ data: buffer });
+    const infoResult = await parser.getInfo();
+
+    const rawTitle: string = infoResult?.info?.Title?.trim() ?? "";
+    const rawAuthor: string = infoResult?.info?.Author?.trim() ?? "";
+    const rawDate: string = infoResult?.info?.CreationDate?.trim() ?? "";
+
+    // Title: use metadata unless it's generic
+    let title = "";
+    if (rawTitle && !isGenericPdfTitle(rawTitle)) {
+      title = rawTitle;
+    } else {
+      // Fallback: filename from URL path
+      const filename = pdfFilenameFromUrl(urlPathname);
+      if (filename) {
+        title = filename.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+      }
+    }
+
+    // Authors: only from PDF metadata — never invent
+    const authors: string[] = [];
+    if (rawAuthor && !/^(n\/a|none|unknown|null|undefined)$/i.test(rawAuthor)) {
+      const parts = rawAuthor.split(/[;,]/).map((a) => a.trim()).filter(Boolean);
+      for (const p of parts) {
+        if (!authors.includes(p)) authors.push(p);
+      }
+    }
+
+    // Date: from PDF CreationDate or URL path year regex
+    let pubDate = "";
+    if (rawDate) {
+      const dateMatch = rawDate.match(/D:(\d{4})/);
+      if (dateMatch) pubDate = dateMatch[1];
+    }
+    if (!pubDate) {
+      pubDate = extractYearFromUrl(urlPathname);
+    }
+
+    try { await parser.destroy(); } catch {}
+
+    return {
+      title,
+      siteName: "",
+      authors,
+      pubDate,
+      volume: "",
+      issue: "",
+      pages: "",
+      doi: "",
+    };
+  } catch {
+    const filename = pdfFilenameFromUrl(urlPathname);
+    const title = filename ? filename.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim() : "";
+    const pubDate = extractYearFromUrl(urlPathname);
+    return { title, siteName: "", authors: [], pubDate, volume: "", issue: "", pages: "", doi: "" };
+  }
+}
+
 function buildSearchQueryFromUrl(parsedUrl: URL, hostname: string): string {
   const isCran = /cran/i.test(hostname);
   if (isCran) {
@@ -411,6 +504,53 @@ export async function POST(req: Request) {
 
     const hostname = parsedUrl.hostname.replace(/^www\./i, "");
 
+    // ─── PDF direct link detection ───
+    if (isPdfUrl(parsedUrl.pathname)) {
+      try {
+        const pdfRes = await fetch(cleanUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/pdf,*/*",
+          },
+          signal: AbortSignal.timeout(15000),
+          redirect: "follow",
+        });
+        if (pdfRes.ok) {
+          const contentType = pdfRes.headers.get("content-type") || "";
+          if (contentType.includes("pdf")) {
+            const pdfBuffer = await pdfRes.arrayBuffer();
+            if (pdfBuffer && pdfBuffer.byteLength > 100) {
+              const pdfResult = await parsePdfFromBuffer(Buffer.from(pdfBuffer), parsedUrl.pathname);
+              return NextResponse.json({
+                title: pdfResult.title || "",
+                siteName: pdfResult.siteName || "",
+                authors: pdfResult.authors || [],
+                pubDate: pdfResult.pubDate || "",
+                volume: pdfResult.volume || "",
+                issue: pdfResult.issue || "",
+                pages: pdfResult.pages || "",
+                doi: pdfResult.doi || "",
+              });
+            }
+          }
+        }
+      } catch {
+        // PDF fetch failed — fall through to normal flow
+      }
+      // If we couldn't download/parse the PDF, return URL-derived fallback only
+      const fallbackTitle = pdfFilenameFromUrl(parsedUrl.pathname).replace(/[-_]/g, " ");
+      return NextResponse.json({
+        title: fallbackTitle || "",
+        siteName: "",
+        authors: [],
+        pubDate: extractYearFromUrl(parsedUrl.pathname) || "",
+        volume: "",
+        issue: "",
+        pages: "",
+        doi: "",
+      });
+    }
+
     // Fetch the page
     let html = "";
     let fetchFailed = false;
@@ -433,6 +573,24 @@ export async function POST(req: Request) {
       });
       fetchStatus = res.status;
       if (res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        // If the server returned a PDF despite a non-.pdf URL, route to PDF parser
+        if (contentType.includes("pdf")) {
+          const pdfBuffer = await res.arrayBuffer();
+          if (pdfBuffer && pdfBuffer.byteLength > 100) {
+            const pdfResult = await parsePdfFromBuffer(Buffer.from(pdfBuffer), parsedUrl.pathname);
+            return NextResponse.json({
+              title: pdfResult.title || "",
+              siteName: pdfResult.siteName || "",
+              authors: pdfResult.authors || [],
+              pubDate: pdfResult.pubDate || "",
+              volume: pdfResult.volume || "",
+              issue: pdfResult.issue || "",
+              pages: pdfResult.pages || "",
+              doi: pdfResult.doi || "",
+            });
+          }
+        }
         html = await res.text();
       } else {
         console.error(`Citation scrape: HTTP ${res.status} ${res.statusText} for ${cleanUrl}`);
