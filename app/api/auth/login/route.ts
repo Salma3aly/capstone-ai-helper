@@ -10,11 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: "Invalid email address" }, { status: 400 });
-    }
-
-    const user = await findUserByEmail(email);
+    const user = findUserByEmail(email);
     if (!user) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
@@ -28,7 +24,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, userType: user.userType, grade: user.grade, phone: user.phone, organization: user.organization },
+      user: { id: user.id, name: user.name, email: user.email, userType: user.userType, grade: user.grade, phone: user.phone, university: user.university, organization: user.organization },
     });
   } catch {
     return NextResponse.json({ error: "Login failed" }, { status: 500 });

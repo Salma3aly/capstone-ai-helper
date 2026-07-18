@@ -13,23 +13,24 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
     }
 
-    const { name, email, userType, grade, phone, organization, avatar } = await req.json();
+    const { name, email, userType, grade, phone, organization, university, avatar } = await req.json();
 
     if (!name || !email) {
       return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
     }
 
-    const existing = await findUserByEmail(email);
+    const existing = findUserByEmail(email);
     if (existing && existing.id !== payload.id) {
       return NextResponse.json({ error: "Email already in use" }, { status: 409 });
     }
 
-    const updated = await updateUser(payload.id, { name, email, userType, grade, phone, organization, avatar });
+    const updated = updateUser(payload.id, { name, email, userType, grade, phone, organization, university, avatar });
     if (!updated) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ user: updated });
+    const { password, ...safe } = updated;
+    return NextResponse.json({ user: safe });
   } catch {
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }

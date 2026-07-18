@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth/db";
-import { connectDB } from "@/lib/db/connect";
-import { ChatSessionModel } from "@/lib/db/models/ChatSession";
+import { readStore, writeStore } from "@/lib/storage/db";
 
 interface ChatSession {
   id: string;
@@ -22,10 +21,10 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    await connectDB();
-    const userSessions = await ChatSessionModel.find({ userId: user.id })
-      .sort({ updatedAt: -1 })
-      .lean();
+    const sessions = await readStore<ChatSession[]>("chat_history");
+    const userSessions = sessions
+      .filter((s) => s.userId === user.id)
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     return NextResponse.json({ sessions: userSessions });
   } catch {
     return NextResponse.json({ sessions: [] });
@@ -42,27 +41,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Messages array is required" }, { status: 400 });
     }
 
-    await connectDB();
+    const sessions = await readStore<ChatSession[]>("chat_history");
     const now = new Date().toISOString();
 
     // Find existing session or create new one
-    let session = await ChatSessionModel.findOne({ userId: user.id });
+    let session = sessions.find((s) => s.userId === user.id);
     if (session) {
       session.messages = messages;
       session.updatedAt = now;
-      await session.save();
     } else {
-      session = new ChatSessionModel({
+      session = {
         id: `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         userId: user.id,
         messages,
         createdAt: now,
         updatedAt: now,
-      });
-      await session.save();
+      };
+      sessions.push(session);
     }
 
-    return NextResponse.json({ session: session.toObject() });
+    await writeStore("chat_history", sessions);
+    return NextResponse.json({ session });
   } catch {
     return NextResponse.json({ error: "Failed to save chat history" }, { status: 500 });
   }
@@ -73,8 +72,9 @@ export async function DELETE(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    await connectDB();
-    await ChatSessionModel.deleteMany({ userId: user.id });
+    const sessions = await readStore<ChatSession[]>("chat_history");
+    const filtered = sessions.filter((s) => s.userId !== user.id);
+    await writeStore("chat_history", filtered);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Failed to clear chat history" }, { status: 500 });

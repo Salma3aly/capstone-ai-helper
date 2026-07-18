@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectDB } from "@/lib/db/connect";
-import { SandboxProjectModel } from "@/lib/db/models/SandboxProject";
+import { readStore, writeStore } from "@/lib/storage/db";
 import type { SandboxProject } from "@/lib/sandbox/types";
 
 interface StoredSandbox extends SandboxProject {
@@ -14,8 +13,8 @@ export async function GET(
   const { id } = await params;
 
   try {
-    await connectDB();
-    const project = await SandboxProjectModel.findOne({ id }).lean();
+    const projects = await readStore<StoredSandbox[]>("sandbox_projects");
+    const project = projects.find((p) => p.id === id);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
     return NextResponse.json({ project });
@@ -31,12 +30,12 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    await connectDB();
-    const result = await SandboxProjectModel.deleteOne({ id });
-    if (result.deletedCount === 0) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    }
+    const projects = await readStore<StoredSandbox[]>("sandbox_projects");
+    const project = projects.find((p) => p.id === id);
+    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
+    const filtered = projects.filter((p) => p.id !== id);
+    await writeStore("sandbox_projects", filtered);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete project" }, { status: 500 });

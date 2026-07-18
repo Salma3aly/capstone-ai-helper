@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import Pusher from "pusher-js";
 import { useAuth } from "@/lib/context/AuthContext";
 import { Hash, Send, Plus, Users, BookOpen, MessageSquare, ExternalLink, X } from "lucide-react";
 
@@ -21,6 +20,13 @@ interface Channel {
   description: string;
 }
 
+interface PresenceUser {
+  name: string;
+  email: string;
+  online: boolean;
+}
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const DEFAULT_CHANNELS: Channel[] = [
   { id: "general", name: "general", description: "General capstone discussions" },
   { id: "electronics-help", name: "electronics-help", description: "Troubleshoot sensors, wiring & code" },
@@ -38,10 +44,10 @@ export default function HubPage() {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [presence, setPresence] = useState<PresenceUser[]>([]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const subscribedRef = useRef(new Set<string>());
-  const pusherRef = useRef<any>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const loadHubData = async (silent = false) => {
     try {
@@ -59,55 +65,63 @@ export default function HubPage() {
     loadHubData();
   }, []);
 
-  // Set up Pusher connection
+  // WebSocket connection for real-time updates
   useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_PUSHER_KEY;
-    const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "us2";
-    if (!key) return;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
 
-    const pusher = new Pusher(key, { cluster });
-    pusherRef.current = pusher;
+    function connect() {
+      try {
+        ws = new WebSocket(WS_URL);
+        wsRef.current = ws;
 
-    // Global channel for channel-created events
-    const globalChannel = pusher.subscribe("hub-global");
-    globalChannel.bind("channel-created", (data: Channel) => {
-      setChannels((prev) => {
-        if (prev.some((c) => c.id === data.id)) return prev;
-        return [...prev, data];
-      });
-    });
+        ws.onopen = () => {
+          // Send join info
+          if (user) {
+            ws?.send(JSON.stringify({ type: "join", userName: user.name, userEmail: user.email }));
+          }
+        };
 
-    const subscribeToChan = (chanId: string) => {
-      if (subscribedRef.current.has(chanId)) return;
-      subscribedRef.current.add(chanId);
-      const channel = pusher.subscribe(`hub-${chanId}`);
-      channel.bind("new-message", (msg: Message) => {
-        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-      });
-    };
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "new_message") {
+              setMessages((prev) =>
+                prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]
+              );
+            } else if (data.type === "channel_created") {
+              setChannels((prev) => {
+                if (prev.some((c) => c.id === data.channel.id)) return prev;
+                return [...prev, data.channel];
+              });
+            } else if (data.type === "presence") {
+              setPresence(data.users || []);
+            }
+          } catch {}
+        };
 
-    channels.forEach((c) => subscribeToChan(c.id));
+        ws.onclose = () => {
+          wsRef.current = null;
+          // Reconnect after 3s
+          reconnectTimer = setTimeout(connect, 3000);
+        };
+      } catch {}
+    }
+
+    connect();
 
     return () => {
-      pusher.disconnect();
-      pusherRef.current = undefined;
-      subscribedRef.current.clear();
+      clearTimeout(reconnectTimer);
+      if (ws) ws.close();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user]);
 
-  // Watch for new channels added after mount and subscribe to them
+  // Refresh presence when user changes
   useEffect(() => {
-    const pusher = pusherRef.current;
-    if (!pusher) return;
-    channels.forEach((c) => {
-      if (subscribedRef.current.has(c.id)) return;
-      subscribedRef.current.add(c.id);
-      const channel = pusher.subscribe(`hub-${c.id}`);
-      channel.bind("new-message", (msg: Message) => {
-        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-      });
-    });
-  }, [channels]);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && user) {
+      wsRef.current.send(JSON.stringify({ type: "join", userName: user.name, userEmail: user.email }));
+    }
+  }, [user]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -237,6 +251,23 @@ export default function HubPage() {
               ))}
             </div>
           </div>
+
+          {/* Online users */}
+          {presence.length > 0 && (
+            <div>
+              <span className="text-[10px] uppercase font-bold text-[#64748b] tracking-wider block mb-2">
+                Online — {presence.length}
+              </span>
+              <div className="space-y-1">
+                {presence.map((p) => (
+                  <div key={p.email} className="flex items-center gap-2 px-2.5 py-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="text-xs text-[#475569] truncate">{p.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {user && (
