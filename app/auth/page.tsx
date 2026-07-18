@@ -60,9 +60,13 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-blue-50 p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-sm border border-[#e2e8f0] p-8">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-tr from-slate-50 via-white to-pink-50/20 p-4 relative overflow-hidden">
+      {/* Background glowing mesh orbs */}
+      <div className="glow-orb bg-[#ec4899] w-[400px] h-[400px] -top-32 -left-32 animate-pulse duration-[7000ms]" />
+      <div className="glow-orb bg-[#a855f7] w-[450px] h-[450px] -bottom-32 -right-32 animate-pulse duration-[9000ms]" />
+
+      <div className="w-full max-w-md relative z-10">
+        <div className="glass-card rounded-2xl p-8 border border-white/60 shadow-2xl">
           <div className="text-center mb-8 flex flex-col items-center">
             <Logo size={48} textSize="text-2xl" />
             <p className="text-sm text-gray-500 mt-2">
@@ -70,19 +74,19 @@ export default function AuthPage() {
             </p>
           </div>
 
-          <div className="flex bg-slate-50/50 rounded-lg p-1 mb-6">
+          <div className="flex bg-slate-100/50 backdrop-blur-sm rounded-xl p-1 mb-6 border border-gray-200/30">
             <button
               onClick={() => { setMode('login'); setError(''); }}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
-                mode === 'login' ? 'bg-white text-[#db2777] shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              className={`flex-1 py-2 rounded-lg text-sm font-bold transition duration-300 ${
+                mode === 'login' ? 'bg-white text-[#ec4899] shadow-md border border-gray-100' : 'text-gray-500 hover:text-gray-800'
               }`}
             >
               Sign In
             </button>
             <button
               onClick={() => { setMode('register'); setError(''); }}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${
-                mode === 'register' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              className={`flex-1 py-2 rounded-lg text-sm font-bold transition duration-300 ${
+                mode === 'register' ? 'bg-white text-[#a855f7] shadow-md border border-gray-100' : 'text-gray-500 hover:text-gray-800'
               }`}
             >
               Register

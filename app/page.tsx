@@ -6,6 +6,9 @@ import { Logo } from '@/components/Logo';
 import { AiAvatar } from '@/components/AiAvatar';
 import HeroCarousel from '@/components/HeroCarousel';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { BlueprintBackground } from '@/components/ui/BlueprintBackground';
+import { FadeInText } from '@/components/ui/FadeInText';
+import { ShimmerButton } from '@/components/ui/ShimmerButton';
 
 const NAV_ITEMS = [
   { label: 'Features', href: '#features' },
@@ -181,48 +184,50 @@ export default function HomePage() {
       </nav>
 
       {/* ─── Hero ─── */}
-      <section className="bg-[#f8fafc]">
-        <div className="max-w-6xl mx-auto px-4 py-20 md:py-32 flex flex-col md:flex-row items-center gap-12">
-          <div className="flex-1 space-y-6 text-center md:text-left">
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight text-[#0f172a]">
-              Your Capstone Project,{' '}
-              <span className="text-[#ec4899]">Guided Step by Step</span>
+      <section className="bg-[#f8fafc] relative overflow-hidden">
+        <BlueprintBackground className="max-w-6xl mx-auto px-4 py-20 md:py-32 flex flex-col items-center gap-10 relative z-10">
+          <div className="w-full max-w-2xl space-y-6 text-center relative z-10">
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight text-[#0f172a] tracking-tight">
+              <span className="animate-blur-in block">Your Capstone Project,</span>{' '}
+              <span className="animate-blur-in animate-gradient-text block mt-1">Guided Step by Step</span>
             </h1>
-            <p className="text-lg text-[#64748b] max-w-lg mx-auto md:mx-0 leading-relaxed">
+            <p className="animate-blur-in text-lg text-[#64748b] max-w-xl mx-auto leading-relaxed">
               AI-powered mentor for students, makers, and anyone building a project. From choosing a topic to wiring sensors to formatting citations — all in one place.
             </p>
-            <div className="flex flex-wrap gap-3 justify-center md:justify-start">
-              <button onClick={() => router.push(signedIn ? '/dashboard' : '/auth')} className="px-8 py-3 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition shadow-sm">
+            <div className="animate-blur-in flex flex-wrap gap-3 justify-center">
+              <ShimmerButton onClick={() => router.push(signedIn ? '/dashboard' : '/auth')}>
                 {signedIn ? 'Dashboard' : 'Get Started Free'}
-              </button>
-              <a href="#features" className="px-8 py-3 rounded-lg text-sm font-semibold text-[#64748b] border border-[#e2e8f0] hover:border-[#fbcfe8] hover:text-[#db2777] transition">
+              </ShimmerButton>
+              <a href="#features" className="px-8 py-3 rounded-lg text-sm font-semibold text-[#64748b] border border-[#e2e8f0] hover:border-[#fbcfe8] hover:text-[#db2777] transition shadow-sm bg-white/50 backdrop-blur-sm">
                 Learn More
               </a>
             </div>
           </div>
-          <div className="flex-1 max-w-md">
-            <div className="aspect-square w-full">
+          <div className="w-full max-w-md relative z-10 glass-card p-4 rounded-3xl border border-white/50 shadow-2xl">
+            <div className="aspect-square w-full rounded-2xl overflow-hidden">
               <HeroCarousel />
             </div>
           </div>
-        </div>
+        </BlueprintBackground>
       </section>
 
       {/* ─── Features ─── */}
-      <section id="features" className="py-20 bg-white">
+      <section id="features" className="py-20 bg-white relative">
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-[#0f172a]">Everything You Need in One Place</h2>
-            <p className="text-[#64748b] mt-2">Five integrated tools to take your project from idea to completion.</p>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight">Everything You Need in One Place</h2>
+            <p className="text-[#64748b] mt-2 text-sm">Five integrated tools to take your project from idea to completion.</p>
           </div>
-          <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
             {FEATURES.map((f, i) => (
-              <div key={i} className="p-5 bg-white border border-[#e2e8f0] rounded-xl hover:shadow-md hover:border-[#fbcfe8]/20 transition group text-center">
-                <div className="w-10 h-10 mx-auto mb-3 rounded-lg bg-[#f8fafc] flex items-center justify-center text-[#ec4899] group-hover:bg-[#ec4899] group-hover:text-white transition">
+              <div key={i} className="p-4 bg-white border border-[#e2e8f0] rounded-2xl hover-glow-card group flex items-start gap-4">
+                <div className="w-12 h-12 shrink-0 rounded-xl bg-[#f8fafc] flex items-center justify-center text-[#ec4899] group-hover:bg-[#ec4899] group-hover:text-white group-hover:scale-110 transition duration-300 shadow-sm">
                   {f.icon}
                 </div>
-                <h3 className="font-bold text-sm text-[#0f172a] mb-1">{f.title}</h3>
-                <p className="text-xs text-[#64748b] leading-relaxed">{f.desc}</p>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-sm text-[#0f172a] mb-1">{f.title}</h3>
+                  <p className="text-xs text-[#64748b] leading-relaxed">{f.desc}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -233,17 +238,17 @@ export default function HomePage() {
       <section id="how-it-works" className="py-20 bg-[#f8fafc]">
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-[#0f172a]">How It Works</h2>
-            <p className="text-[#64748b] mt-2">From idea to presentation in 5 simple steps.</p>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight">How It Works</h2>
+            <p className="text-[#64748b] mt-2 text-sm">From idea to presentation in 5 simple steps.</p>
           </div>
-          <div className="grid md:grid-cols-5 gap-4">
+          <div className="grid md:grid-cols-5 gap-6">
             {STEPS.map((step) => (
-              <div key={step.num} className="text-center p-5 relative">
-                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-[#ec4899] text-white flex items-center justify-center font-bold text-lg shadow-sm">
+              <div key={step.num} className="text-center p-6 bg-white border border-[#e2e8f0] rounded-2xl shadow-sm hover:shadow-md transition relative">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gradient-to-tr from-[#ec4899] to-[#a855f7] text-white flex items-center justify-center font-extrabold text-lg shadow-md">
                   {step.num}
                 </div>
-                <h3 className="font-bold text-sm text-[#0f172a] mb-1">{step.title}</h3>
-                <p className="text-xs text-[#64748b]">{step.desc}</p>
+                <h3 className="font-bold text-sm text-[#0f172a] mb-1.5">{step.title}</h3>
+                <p className="text-xs text-[#64748b] leading-relaxed">{step.desc}</p>
               </div>
             ))}
           </div>
@@ -254,10 +259,10 @@ export default function HomePage() {
       <section id="tools" className="py-20 bg-white">
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-[#0f172a]">Explore Your Tools</h2>
-            <p className="text-[#64748b] mt-2">Click any tool to start building.</p>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight">Explore Your Tools</h2>
+            <p className="text-[#64748b] mt-2 text-sm">Click any tool to start building.</p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { icon: MessageCircle, title: 'Lipo AI Chat', href: '/chat' },
                 { icon: Beaker, title: 'Sandbox Wizard', href: '/sandbox' },
@@ -267,13 +272,17 @@ export default function HomePage() {
                 <a
                   key={tool.title}
                   href={tool.href}
-                  className="p-6 bg-white border border-[#e2e8f0] rounded-xl hover:shadow-md hover:border-[#fbcfe8]/20 transition group"
+                  className="p-6 bg-white border border-[#e2e8f0] rounded-2xl hover-glow-card group text-center flex flex-col justify-between"
                 >
-                  <div className="mb-3 flex items-center justify-center">
-                    <tool.icon className="w-8 h-8 text-[#db2777]" />
+                  <div>
+                    <div className="mb-4 flex items-center justify-center">
+                      <div className="p-3 bg-[#fdf2f8] rounded-xl text-[#db2777] group-hover:bg-[#db2777] group-hover:text-white transition duration-300">
+                        <tool.icon className="w-8 h-8" />
+                      </div>
+                    </div>
+                    <h3 className="font-bold text-[#0f172a] group-hover:text-[#db2777] transition duration-300">{tool.title}</h3>
                   </div>
-                  <h3 className="font-bold text-[#0f172a] group-hover:text-[#db2777] transition">{tool.title}</h3>
-                  <p className="text-xs text-[#64748b] mt-1">Click to open →</p>
+                  <p className="text-xs text-[#ec4899] mt-3 font-semibold group-hover:underline">Open tool →</p>
                 </a>
               ))}
           </div>

@@ -85,8 +85,3 @@ export function verifyToken(token: string): SafeUser | null {
     return null;
   }
 }
-
-export async function readDb(): Promise<IUser[]> {
-  await connectDB();
-  return User.find().lean();
-}

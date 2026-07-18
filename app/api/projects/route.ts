@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth/db";
-import { readStore, writeStore } from "@/lib/storage/db";
+import { connectDB } from "@/lib/db/connect";
+import { LegacyProjectModel } from "@/lib/db/models/LegacyProject";
 import type { SavedProject } from "@/lib/sandbox/types";
 
 function getUser(req: NextRequest) {
@@ -18,10 +19,10 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const projects = await readStore<StoredProject[]>("projects");
-    const userProjects = projects
-      .filter((p) => p.userId === user.id)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    await connectDB();
+    const userProjects = await LegacyProjectModel.find({ userId: user.id })
+      .sort({ updatedAt: -1 })
+      .lean();
     return NextResponse.json({ projects: userProjects });
   } catch {
     return NextResponse.json({ projects: [] });
@@ -34,9 +35,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+    await connectDB();
     const now = Date.now();
 
-    const project: StoredProject = {
+    const project = new LegacyProjectModel({
       id: now.toString(),
       userId: user.id,
       idea: body.idea || "",
@@ -50,13 +52,11 @@ export async function POST(req: NextRequest) {
       createdAt: now,
       updatedAt: now,
       status: body.status || "idea",
-    };
+    });
 
-    const projects = await readStore<StoredProject[]>("projects");
-    projects.push(project);
-    await writeStore("projects", projects);
+    await project.save();
 
-    return NextResponse.json({ project });
+    return NextResponse.json({ project: project.toObject() });
   } catch {
     return NextResponse.json({ error: "Failed to create project" }, { status: 500 });
   }
@@ -72,14 +72,16 @@ export async function PUT(req: NextRequest) {
 
     if (!id) return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
 
-    const projects = await readStore<StoredProject[]>("projects");
-    const idx = projects.findIndex((p) => p.id === id);
-    if (idx === -1) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    if (projects[idx].userId !== user.id) return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    await connectDB();
+    const updated = await LegacyProjectModel.findOneAndUpdate(
+      { id, userId: user.id },
+      { $set: { ...data, updatedAt: Date.now() } },
+      { new: true }
+    ).lean();
 
-    projects[idx] = { ...projects[idx], ...data, updatedAt: Date.now() };
-    await writeStore("projects", projects);
-    return NextResponse.json({ project: projects[idx] });
+    if (!updated) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+    return NextResponse.json({ project: updated });
   } catch {
     return NextResponse.json({ error: "Failed to update project" }, { status: 500 });
   }
@@ -94,13 +96,12 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
 
-    const projects = await readStore<StoredProject[]>("projects");
-    const project = projects.find((p) => p.id === id);
-    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    if (project.userId !== user.id) return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    await connectDB();
+    const result = await LegacyProjectModel.deleteOne({ id, userId: user.id });
+    if (result.deletedCount === 0) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
 
-    const filtered = projects.filter((p) => p.id !== id);
-    await writeStore("projects", filtered);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete project" }, { status: 500 });

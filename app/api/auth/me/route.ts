@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken, readDb } from "@/lib/auth/db";
+import { verifyToken, findUserById } from "@/lib/auth/db";
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
@@ -12,8 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
   }
 
-  const users = await readDb();
-  const user = users.find((u) => u.id === payload.id);
+  const user = await findUserById(payload.id);
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
