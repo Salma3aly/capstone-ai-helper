@@ -89,6 +89,100 @@ function extractSoftwareAuthors(apiResponse: any): string[] {
     .filter((name) => name.length > 0 && !name.toLowerCase().includes("cran"));
 }
 
+/**
+ * Extract author names from the first ~1-2 pages of PDF text.
+ * Looks for typical byline patterns: names appearing near the title,
+ * separated by commas/and, optionally followed by affiliation in parens.
+ * Strips footnote markers, acknowledgment lines, and "with research assistance from" lines.
+ */
+export function extractAuthorsFromPdfText(pdfText: string): string[] {
+  if (!pdfText) return [];
+
+  // Grab first 3000 chars — covers the title area + byline on first 1-2 pages
+  const head = pdfText.slice(0, 3000);
+
+  // Remove acknowledgment/research-assistance lines entirely
+  const cleaned = head.replace(/acknowledge?ments?[\s\S]{0,500}$/i, "")
+    .replace(/with research assistance from[\s\S]{0,200}$/i, "")
+    .replace(/supported by[\s\S]{0,200}$/i, "");
+
+  const result: string[] = [];
+
+  // Pattern 1: Lines that look like a byline — "John Smith, Jane Doe, and Bob Jones"
+  // Typically found after the title, before "Abstract" or body text.
+  // Match lines containing 2+ capitalized names separated by commas/and, ending before abstract
+  const bodyStart = cleaned.search(/\b(abstract|introduction|background|1\.?\s)/i);
+  const headerArea = bodyStart > 0 ? cleaned.slice(0, bodyStart) : cleaned;
+
+  const lines = headerArea.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // Find the byline: usually the first line that has multiple capitalized names
+  // with commas or "and" and doesn't look like a title (too short or all-caps)
+  for (const line of lines) {
+    if (result.length > 0) break;
+
+    // Skip lines that are clearly titles (all caps, too many words)
+    if (line.length > 120) continue;
+    if (line === line.toUpperCase() && line.length > 30) continue;
+    if (/^(figure|table|chapter|section|\d+\.)/i.test(line)) continue;
+
+    // Count potential author names: capitalized words followed by more capitalized words
+    const nameMatches = line.match(/([A-Z][a-z]+\s[A-Z][a-z]+(?:\s[A-Z][a-z]+\.?)?)/g);
+    if (!nameMatches || nameMatches.length < 1) continue;
+
+    // A byline typically has 1-20 names separated by commas or "and"
+    // It should NOT contain typical header words
+    if (/\b(abstract|introduction|keywords|email|correspondence|university|institute|department|college|school|journal|volume|issue|page|doi|published|received|accepted)\b/i.test(line)) {
+      continue;
+    }
+
+    // If the line has commas separating name-like tokens, it's likely a byline
+    const tokens = line.split(/[,;]| and | & /).map((t) => t.trim().replace(/\s+/g, " ")).filter(Boolean);
+
+    const validNames: string[] = [];
+    for (const token of tokens) {
+      // Skip tokens with lowercase-starting first letter (likely affiliations)
+      if (/^[a-z]/.test(token)) continue;
+      // Skip tokens containing digits, URLs, email addresses
+      if (/\d/.test(token) || /@/.test(token) || /https?:\/\//i.test(token)) continue;
+      // Skip single words
+      if (!token.includes(" ")) continue;
+      // Skip very short tokens
+      if (token.length < 5) continue;
+      // Skip if it looks like a footnote marker (e.g. "1", "†", "*")
+      if (/^[\d*†‡§¶#]+/.test(token)) continue;
+
+      // Strip footnote/affiliation markers like "1," "2," "†," at end
+      const clean = token.replace(/[,;]?\s*[\d*†‡§¶#]+$/, "").trim();
+
+      // Must have at least two words that start with capital letters
+      const words = clean.split(" ");
+      const capped = words.filter((w) => /^[A-Z]/.test(w));
+      if (capped.length < 1 || words.length < 2) continue;
+
+      // Skip tokens that are clearly affiliations (contain "University", "Institute", etc.)
+      if (/\b(University|Institute|College|School|Department|Laboratory|Lab|Center|Centre|Corporation|Inc|Ltd|LLC|GmbH|Company)\b/i.test(clean)) {
+        continue;
+      }
+
+      validNames.push(clean);
+    }
+
+    if (validNames.length >= 1) {
+      // Remove duplicates
+      const seen = new Set<string>();
+      for (const name of validNames) {
+        if (!seen.has(name.toLowerCase())) {
+          seen.add(name.toLowerCase());
+          result.push(name);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 function formatCrossrefItem(item: any): AcademicMetadata {
   const title = item.title?.[0] || "Unknown Title";
   const authors = extractSoftwareAuthors(item);

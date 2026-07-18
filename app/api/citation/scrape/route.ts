@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { grokChatJSON } from "@/lib/sandbox/grok";
-import { extractMetadataFromDoiOrTitle } from "@/lib/citation/metadataFetcher";
+import { extractMetadataFromDoiOrTitle, extractAuthorsFromPdfText } from "@/lib/citation/metadataFetcher";
 
 /** Check if a URL path looks like a direct PDF file link */
 function isPdfUrl(pathname: string): boolean {
@@ -30,7 +30,7 @@ function extractYearFromUrl(pathname: string): string {
   return match ? match[1] : "";
 }
 
-/** Parse PDF metadata and return a clean ScrapeResult — never hallucinates */
+/** Parse PDF metadata + first-page text for author byline — never hallucinates */
 async function parsePdfFromBuffer(buffer: Buffer, urlPathname: string): Promise<{
   title: string; siteName: string; authors: string[]; pubDate: string;
   volume: string; issue: string; pages: string; doi: string;
@@ -49,20 +49,31 @@ async function parsePdfFromBuffer(buffer: Buffer, urlPathname: string): Promise<
     if (rawTitle && !isGenericPdfTitle(rawTitle)) {
       title = rawTitle;
     } else {
-      // Fallback: filename from URL path
       const filename = pdfFilenameFromUrl(urlPathname);
       if (filename) {
         title = filename.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
       }
     }
 
-    // Authors: only from PDF metadata — never invent
-    const authors: string[] = [];
+    // Authors: check PDF metadata Author field first
+    let authors: string[] = [];
     if (rawAuthor && !/^(n\/a|none|unknown|null|undefined)$/i.test(rawAuthor)) {
       const parts = rawAuthor.split(/[;,]/).map((a) => a.trim()).filter(Boolean);
       for (const p of parts) {
         if (!authors.includes(p)) authors.push(p);
       }
+    }
+
+    // If no authors from metadata, extract first-page text and look for a byline
+    if (authors.length === 0) {
+      try {
+        const textResult = await parser.getText({ partial: [1, 2] });
+        const firstPages = textResult?.text || "";
+        if (firstPages.length > 50) {
+          const bylineAuthors = extractAuthorsFromPdfText(firstPages);
+          if (bylineAuthors.length > 0) authors = bylineAuthors;
+        }
+      } catch { /* text extraction failed — keep empty authors */ }
     }
 
     // Date: from PDF CreationDate or URL path year regex
@@ -230,11 +241,24 @@ async function fetchOjsOaiMetadata(parsedUrl: URL, articleId: string): Promise<{
   }
 }
 
+/** Check if a string looks like a website/domain/hosting platform name (not a person) */
+function looksLikeDomain(s: string): boolean {
+  const lower = s.toLowerCase();
+  // Common domain-like patterns: no space, ends in TLD, contains common web words
+  if (/\.(com|org|net|edu|gov|io|co|uk|au|ca|de|fr|jp|cn|ru|br|it|es|nl|se|pl|in|us)\b/i.test(lower)) return true;
+  if (/^www\./i.test(lower)) return true;
+  if (/\s(newspaper|magazine|news|blog|website|site|portal|hub|online|daily|weekly|monthly|times|post|herald|tribune|chronicle|journal)$/i.test(lower)) return false; // these CAN be real news orgs
+  // Strings with no spaces (likely a domain or handle)
+  if (!s.includes(" ") && s.length > 5 && /^[a-z0-9.-]+$/i.test(s)) return true;
+  return false;
+}
+
 function cleanAuthors(arr: any): string[] {
   if (!Array.isArray(arr)) return [];
   return arr
     .map((a) => (typeof a === "string" ? a.trim() : ""))
-    .filter((a) => a && !/^(n\/a|none|unknown|null|undefined)$/i.test(a));
+    .filter((a) => a && !/^(n\/a|none|unknown|null|undefined)$/i.test(a))
+    .filter((a) => !looksLikeDomain(a)); // never let a domain/hosting name through as author
 }
 
 function extractMetaField(html: string, patterns: RegExp[]): string {
@@ -647,6 +671,16 @@ export async function POST(req: Request) {
       }
     }
 
+    // When the html is PDF text (from PDF fallback), extract byline authors from first pages
+    let pdfBylineAuthors: string[] = [];
+    if (html && html.length > 200 && html.includes("\n") && !html.includes("<")) {
+      // Likely plain text from PDF — run byline parser
+      pdfBylineAuthors = extractAuthorsFromPdfText(html);
+      if (pdfBylineAuthors.length > 0) {
+        console.error(`Citation scrape: extracted ${pdfBylineAuthors.length} author(s) from PDF byline`);
+      }
+    }
+
     // When the page fetch failed or returned an error page, try OJS OAI-PMH for structured metadata
     let ojsOaiData: { title: string; authors: string[]; pubDate: string; doi: string; siteName: string; volume: string; issue: string; pages: string } | null = null;
     if (!html || html.length < 50) {
@@ -686,9 +720,9 @@ export async function POST(req: Request) {
       console.error(`Citation scrape: Crossref returned data for ${hostname} — title="${crossrefData.title}", authors=${crossrefData.authors.length}`);
     }
 
-    // Step 4: Establish baseline — OJS OAI-PMH first, then Crossref, then meta fills gaps
+    // Step 4: Establish baseline — PDF byline first (for PDF sources), then OJS OAI-PMH, then Crossref, then meta fills gaps
     let siteName = "";
-    let authors: string[] = [];
+    let authors: string[] = [...pdfBylineAuthors]; // Start with PDF byline authors if we extracted any
     let pubDate = "";
     let volume = "";
     let issue = "";
@@ -808,6 +842,8 @@ Given the page text below, ${hint}
 - pages: page range or article number as a string (e.g. "101218"), leave empty for software packages
 - doi: DOI identifier (e.g. "10.1016/j.cossms.2025.101218" or "10.32614/CRAN.package.Weighted.Desc.Stat")
 
+CRITICAL RULE: Do not return a website name, domain, or hosting platform as an author under any circumstances. If you cannot identify one or more individual human or organizational authors from the actual document text, return an empty author list instead of guessing.
+
 Be thorough.
 
 Return ONLY raw JSON matching: {"title": "...", "siteName": "...", "authors": [...], "pubDate": "2025", "volume": "35", "issue": "2", "pages": "101218", "doi": "10.1016/..."}
@@ -863,7 +899,7 @@ Respond with EXACTLY this JSON format (no markdown, no backticks):
 Rules:
 - title: the actual article title
 - siteName: full journal or publication name
-- authors: EVERY single author — list them all
+- authors: EVERY single author — list them all. Do not return a website name, domain, or hosting platform as an author under any circumstances. If you cannot identify one or more individual human or organizational authors, return an empty author list instead of guessing.
 - pubDate: 4-digit year
 - volume, issue, pages, doi: journal metadata (empty strings if not applicable)
 - If you don't know any field, use empty string (not null, not "null")`;

@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation';
 import { Menu, X, ChevronDown, Sparkles, BookOpen, Beaker, BarChart3, MessageCircle, Send, FileText } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { AiAvatar } from '@/components/AiAvatar';
-import HeroCarousel from '@/components/HeroCarousel';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { BlueprintBackground } from '@/components/ui/BlueprintBackground';
 import { FadeInText } from '@/components/ui/FadeInText';
@@ -203,11 +202,6 @@ export default function HomePage() {
               </a>
             </div>
           </div>
-          <div className="w-full max-w-md relative z-10 glass-card p-4 rounded-3xl border border-white/50 shadow-2xl">
-            <div className="aspect-square w-full rounded-2xl overflow-hidden">
-              <HeroCarousel />
-            </div>
-          </div>
         </BlueprintBackground>
       </section>
 
@@ -399,6 +393,7 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-4 text-center text-sm text-[#64748b]">
           <Logo size={28} textSize="text-base" />
           <p className="mt-1">Your project companion — from idea to build, for school, competition, or passion.</p>
+          <p className="mt-4 text-xs text-[#94a3b8]">Founder: Salma Ali</p>
         </div>
       </footer>
     </div>
