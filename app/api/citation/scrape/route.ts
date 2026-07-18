@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { grokChatJSON } from "@/lib/sandbox/grok";
-import { extractMetadataFromDoiOrTitle, extractAuthorsFromPdfText, fetchCrossrefPagesByDoi } from "@/lib/citation/metadataFetcher";
+import { extractMetadataFromDoiOrTitle, extractAuthorsFromPdfText, fetchCrossrefPagesByDoi, extractPageRangeFromOjsHtml } from "@/lib/citation/metadataFetcher";
 
 /** Check if a URL looks like a direct PDF file link */
 function isPdfUrl(urlStr: string): boolean {
@@ -768,6 +768,33 @@ export async function POST(req: Request) {
       // Only use Crossref pages if they contain a range (has dash), not a bare number
       if (crossrefPages && crossrefPages.includes("-")) {
         pages = crossrefPages;
+      }
+    }
+
+    // Step 4c: Last-resort fallback — if pages is still a bare number and the URL
+    // is an OJS article page, try fetching its HTML and parsing the visible citation
+    // text for a full page range. Narrow scope: only affects pages, only runs when needed.
+    if ((!pages || !pages.includes("-")) && isOjsUrl(parsedUrl)) {
+      try {
+        const articleRes = await fetch(cleanUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html",
+          },
+          signal: AbortSignal.timeout(8000),
+          redirect: "follow",
+        });
+        if (articleRes.ok) {
+          const articleHtml = await articleRes.text();
+          if (articleHtml && articleHtml.length > 200) {
+            const ojsRange = extractPageRangeFromOjsHtml(articleHtml);
+            if (ojsRange) {
+              pages = ojsRange;
+            }
+          }
+        }
+      } catch {
+        // OJS HTML fetch failed — preserve whatever we have
       }
     }
     // Meta fills any gaps the baseline left empty

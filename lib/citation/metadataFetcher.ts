@@ -184,6 +184,52 @@ export function extractAuthorsFromPdfText(pdfText: string): string[] {
 }
 
 /**
+ * Parse the OJS article's HTML page for a visible page range.
+ * Looks for page-range patterns near volume/issue/citation text
+ * in the "How to Cite" block or article metadata.
+ */
+export function extractPageRangeFromOjsHtml(html: string): string {
+  if (!html || html.length < 100) return "";
+
+  // Strip HTML tags for text search
+  const text = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Look for volume/issue pattern like "12(4)" or "Vol. 12 No. 4" followed by a page range
+  const patterns = [
+    // "12(4), 38-49" or "12(4): 38-49"
+    /(\d+)\s*\(\s*\d+\s*\)\s*[,:;]?\s*(\d+)\s*[-–]\s*(\d+)/,
+    // "Vol. 12 No. 4, pp. 38-49"
+    /vol\.?\s*\d+\s*(?:no\.?|issue)?\s*\d+[,:;]?\s*(?:pp?\.?\s*)?(\d+)\s*[-–]\s*(\d+)/i,
+    // "volume 12, issue 4, pages 38-49"
+    /volume\s*\d+[,:;]?\s*(?:issue|number|no\.?)\s*\d+[,:;]?\s*(?:pages?|pp?\.?)\s*(\d+)\s*[-–]\s*(\d+)/i,
+    // "pp. 38-49"
+    /pp\.?\s*(\d+)\s*[-–]\s*(\d+)/,
+    // "Pages 38-49"
+    /pages?\s*(\d+)\s*[-–]\s*(\d+)/i,
+  ];
+
+  for (const pat of patterns) {
+    const m = text.match(pat);
+    if (m) {
+      const start = m[m.length - 2];
+      const end = m[m.length - 1];
+      if (start && end && Number(end) > Number(start)) {
+        return `${start}-${end}`;
+      }
+    }
+  }
+
+  return "";
+}
+
+/**
  * Fetch only the page range from Crossref via a direct DOI lookup.
  * Never falls back to title search — avoids wrong-article risk.
  */
