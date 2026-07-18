@@ -78,6 +78,11 @@ ${analysis}
 
 Return ONLY raw JSON. No markdown, no backticks, no explanation.
 
+CRITICAL — Stack field rules:
+- "frontend", "backend", and "database" must each be a SINGLE concrete technology name.
+- Never use "—", "N/A", blank, "/" (slash-separated lists).
+- If the project is a standalone microcontroller/embedded system with no web frontend or backend, set the whole suggested_stack to indicate that rather than listing irrelevant fields.
+
 Format:
 {
   "pages": [
@@ -90,8 +95,8 @@ Format:
     { "name": "Stripe", "why": "Payment processing" }
   ],
   "suggested_stack": {
-    "frontend": "React / Next.js",
-    "backend": "Node.js / Express",
+    "frontend": "React",
+    "backend": "Node.js",
     "database": "PostgreSQL"
   }
 }`;

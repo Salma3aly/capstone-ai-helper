@@ -28,14 +28,22 @@ export async function xaiChat(
   }
 
   const model = getModel();
-  const res = await fetch(`${XAI_BASE}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.XAI_API_KEY}`,
-    },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: false }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  let res;
+  try {
+    res = await fetch(`${XAI_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: false }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const err = await res.text();
@@ -66,14 +74,22 @@ export function xaiChatStream(
     async start(controller) {
       try {
         const model = getModel();
-        const res = await fetch(`${XAI_BASE}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.XAI_API_KEY}`,
-          },
-          body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: true }),
-        });
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 120000);
+        let res;
+        try {
+          res = await fetch(`${XAI_BASE}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.XAI_API_KEY}`,
+            },
+            body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: true }),
+            signal: ac.signal,
+          });
+        } finally {
+          clearTimeout(t);
+        }
 
         if (!res.ok) {
           controller.error(new Error(`xAI API error (${res.status}): ${await res.text()}`));
@@ -130,6 +146,19 @@ export async function xaiChatJSON<T>(
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    throw new Error(`Failed to parse xAI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
+    // Attempt JSON repair for literal newlines inside strings
+    let out = ""; let inStr = false; let esc = false;
+    for (const ch of cleaned) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === "\\") { out += ch; esc = true; continue; }
+      if (ch === '"' && !esc) { inStr = !inStr; out += ch; continue; }
+      if (inStr && (ch === "\n" || ch === "\r")) { out += "\\n"; continue; }
+      out += ch;
+    }
+    try {
+      return JSON.parse(out) as T;
+    } catch {
+      throw new Error(`Failed to parse xAI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
+    }
   }
 }

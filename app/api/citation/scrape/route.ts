@@ -39,6 +39,104 @@ function cleanString(s: any): string {
   return cleaned;
 }
 
+/** Sanitize journal titles — undo common truncation/mangling */
+function cleanJournalTitle(raw: string): string {
+  let s = raw.trim();
+  // Fix truncated "AI Magazino" / "AI Magaz" etc back to "AI Magazine"
+  s = s.replace(/\bAI\s+Magazi[a-z]+$/i, "AI Magazine");
+  // Remove trailing punctuation that suggests truncation
+  s = s.replace(/[,…;\-]+$/, "").trim();
+  return s;
+}
+
+/** Known publisher hostnames → expected DOI prefix */
+const PUBLISHER_DOI_PREFIXES: Record<string, string> = {
+  "ojs.aaai.org": "10.1609",
+  "aaai.org": "10.1609",
+};
+
+/** Check if a Crossref DOI looks valid for the given hostname */
+function doiMatchesHost(doi: string, hostname: string): boolean {
+  const prefix = PUBLISHER_DOI_PREFIXES[hostname];
+  if (!prefix) return true; // unknown host — don't filter
+  return doi.startsWith(prefix);
+}
+
+/** Detect OJS-style URL patterns */
+function isOjsUrl(parsedUrl: URL): string | null {
+  const match = parsedUrl.pathname.match(/\/article\/view\/(\d+)/);
+  if (!match) return null;
+  return match[1]; // article ID
+}
+
+/** Try OJS OAI-PMH endpoint for structured metadata */
+async function fetchOjsOaiMetadata(parsedUrl: URL, articleId: string): Promise<{ title: string; authors: string[]; pubDate: string; doi: string; siteName: string; volume: string; issue: string; pages: string } | null> {
+  // Build OAI URL from the OJS URL structure:
+  //   {scheme}://{host}/{journal_path}/index.php/{journal_path}/oai
+  const pathname = parsedUrl.pathname;
+  const match = pathname.match(/^(.*?)\/index\.php\/([^/]+)/);
+  if (!match) return null;
+  const basePath = match[1]; // e.g. /aimagazine
+  const journalName = match[2]; // e.g. aimagazine
+  const oaiUrl = `${parsedUrl.protocol}//${parsedUrl.host}${basePath}/index.php/${journalName}/oai`;
+  const identifier = `oai:ojs.aaai.org:article/${articleId}`;
+  const params = `?verb=GetRecord&metadataPrefix=oai_dc&identifier=${encodeURIComponent(identifier)}`;
+  try {
+    const res = await fetch(oaiUrl + params, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const xml = await res.text();
+    const title = (xml.match(/<dc:title[^>]*>([^<]+)<\/dc:title>/i)?.[1] || "").trim();
+    // Authors come as "Last, First M." from OJS
+    const rawAuthors = [...xml.matchAll(/<dc:creator>([^<]+)<\/dc:creator>/gi)].map((m) => m[1].trim()).filter(Boolean);
+    const authors = rawAuthors.map((a) => {
+      const parts = a.split(",").map((p) => p.trim());
+      if (parts.length >= 2) return `${parts[1]} ${parts[0]}`; // "Last, First" → "First Last"
+      return a;
+    });
+    const date = xml.match(/<dc:date>([^<]+)<\/dc:date>/i)?.[1] || "";
+    const pubDate = date ? date.slice(0, 4) : "";
+    // Look for DOI identifier (not URL)
+    const doiMatches = [...xml.matchAll(/<dc:identifier[^>]*>([^<]+)<\/dc:identifier>/gi)];
+    let doi = "";
+    for (const dm of doiMatches) {
+      const val = dm[1].trim();
+      if (/^10\.\d{4,}/.test(val)) { doi = val; break; }
+    }
+    // Extract journal name, volume, issue, pages from <dc:source>
+    // Format: "Journal Name; Vol. X No. Y: ...; Pages"
+    const sourceMatch = xml.match(/<dc:source[^>]*>([^<]+)<\/dc:source>/i);
+    let siteName = "";
+    let volume = "";
+    let issue = "";
+    let pages = "";
+    if (sourceMatch) {
+      const source = sourceMatch[1];
+      const parts = source.split(";").map((s) => s.trim());
+      siteName = parts[0] || "";
+      const volMatch = source.match(/\bVol\.?\s*(\d+)/i);
+      if (volMatch) volume = volMatch[1];
+      const issMatch = source.match(/\bNo\.?\s*(\d+)/i);
+      if (issMatch) issue = issMatch[1];
+      // Pages are often the last semicolon segment, e.g. "38"
+      if (parts.length >= 3) {
+        const lastPart = parts[parts.length - 1].trim();
+        if (/^\d+(-\d+)?$/.test(lastPart)) pages = lastPart;
+      }
+    }
+    // Fallback to publisher name if no journal name found
+    if (!siteName) {
+      const pubMatch = xml.match(/<dc:publisher[^>]*>([^<]+)<\/dc:publisher>/i);
+      if (pubMatch) siteName = pubMatch[1].trim();
+    }
+    return { title, authors, pubDate, doi, siteName, volume, issue, pages };
+  } catch {
+    return null;
+  }
+}
+
 function cleanAuthors(arr: any): string[] {
   if (!Array.isArray(arr)) return [];
   return arr
@@ -391,6 +489,19 @@ export async function POST(req: Request) {
       }
     }
 
+    // When the page fetch failed or returned an error page, try OJS OAI-PMH for structured metadata
+    let ojsOaiData: { title: string; authors: string[]; pubDate: string; doi: string; siteName: string; volume: string; issue: string; pages: string } | null = null;
+    if (!html || html.length < 50) {
+      const articleId = isOjsUrl(parsedUrl);
+      if (articleId) {
+        console.error(`Citation scrape: detected OJS URL, trying OAI-PMH for article ${articleId}`);
+        ojsOaiData = await fetchOjsOaiMetadata(parsedUrl, articleId);
+        if (ojsOaiData) {
+          console.error(`Citation scrape: OAI-PMH returned title="${ojsOaiData.title}", authors=${ojsOaiData.authors.length}`);
+        }
+      }
+    }
+
     // Step 1: Extract from meta tags (gives us baseline data + possible DOI)
     const metaResult = tryExtractMeta(html);
 
@@ -402,22 +513,22 @@ export async function POST(req: Request) {
     }
 
     // Step 3: Try Crossref immediately (same order as PDF pipeline)
-    let title = metaResult?.title || userTitle || titleFromUrlPath(parsedUrl.pathname) || "";
+    let title = metaResult?.title || userTitle || ojsOaiData?.title || titleFromUrlPath(parsedUrl.pathname) || "";
     const urlDerivedTitle = title; // save before Crossref possibly corrupts it
     // Build the best search query from URL for Crossref fallback
     const urlQuery = buildSearchQueryFromUrl(parsedUrl, hostname) || "";
-    const fallbackTitle = urlQuery || title;
+    const fallbackTitle = ojsOaiData?.title || urlQuery || title;
     if (fetchFailed && fallbackTitle) {
       console.error(`Citation scrape: fetch failed for ${cleanUrl}, using Crossref search with query: "${fallbackTitle}"`);
     }
-    let crossrefData = await extractMetadataFromDoiOrTitle(doi || metaResult?.doi, fallbackTitle);
+    let crossrefData = await extractMetadataFromDoiOrTitle(doi || metaResult?.doi || ojsOaiData?.doi, fallbackTitle);
     if (!crossrefData) {
       console.error(`Citation scrape: Crossref returned no data for ${hostname} (query: "${fallbackTitle}")`);
     } else {
       console.error(`Citation scrape: Crossref returned data for ${hostname} — title="${crossrefData.title}", authors=${crossrefData.authors.length}`);
     }
 
-    // Step 4: Establish baseline — Crossref takes precedence, meta fills gaps
+    // Step 4: Establish baseline — OJS OAI-PMH first, then Crossref, then meta fills gaps
     let siteName = "";
     let authors: string[] = [];
     let pubDate = "";
@@ -425,17 +536,34 @@ export async function POST(req: Request) {
     let issue = "";
     let pages = "";
 
-    if (crossrefData) {
+    // OJS OAI-PMH data is most reliable when page is blocked
+    if (ojsOaiData) {
+      if (ojsOaiData.title) title = ojsOaiData.title;
+      if (ojsOaiData.authors.length > 0) authors = ojsOaiData.authors;
+      if (ojsOaiData.pubDate) pubDate = ojsOaiData.pubDate;
+      if (ojsOaiData.siteName) siteName = ojsOaiData.siteName;
+      if (ojsOaiData.volume) volume = ojsOaiData.volume;
+      if (ojsOaiData.issue) issue = ojsOaiData.issue;
+      if (ojsOaiData.pages) pages = ojsOaiData.pages;
+      if (ojsOaiData.doi) doi = ojsOaiData.doi;
+    }
+
+    // Validate Crossref data against known publisher prefixes
+    // Check the Crossref DOI (not the existing DOI) to see if it matches the host
+    const crossrefDoi = crossrefData?.doi ? crossrefData.doi.replace(/^https?:\/\/doi\.org\//i, "") : "";
+    const crossrefTrusted = crossrefData && (!crossrefDoi || doiMatchesHost(crossrefDoi, hostname));
+    if (crossrefData && crossrefTrusted) {
       if (crossrefData.title && crossrefData.title !== "Unknown Title") title = crossrefData.title;
       if (crossrefData.authors && crossrefData.authors.length > 0) authors = crossrefData.authors;
       if (crossrefData.journal) siteName = crossrefData.journal;
       if (crossrefData.volume) volume = crossrefData.volume;
       if (crossrefData.issue) issue = crossrefData.issue;
-      if (crossrefData.pages) pages = crossrefData.pages;
+      // Only trust pages/DOI from Crossref if the fetch succeeded (error pages produce bad crossref matches)
+      if (crossrefData.pages && !fetchFailed && html && html.length > 50) pages = crossrefData.pages;
+      if (crossrefData.doi && !fetchFailed && html && html.length > 50) doi = crossrefData.doi;
       if (crossrefData.year) pubDate = crossrefData.year;
-      if (crossrefData.doi) doi = crossrefData.doi;
     }
-    // Meta fills any gaps Crossref left empty
+    // Meta fills any gaps the baseline left empty
     if (!title) title = metaResult?.title || titleFromUrlPath(parsedUrl.pathname) || "";
     if (!siteName) siteName = metaResult?.siteName || hostname;
     if (authors.length === 0) authors = metaResult?.authors || [];
@@ -552,9 +680,9 @@ ${snippet}`;
       }
     }
 
-    // Step 5b: When no HTML was available (fetch blocked / error page), try LLM with just the URL.
-    // Discard any bad Crossref data — start fresh with just the URL context.
-    if ((!html || html.length < 200) && (fetchFailed || authors.length === 0 || !pubDate) && urlDerivedTitle) {
+    // Step 5b: When no HTML was available and we're still missing essential data,
+    // try LLM with just the URL context. Only fills gaps — doesn't override good data.
+    if ((!html || html.length < 200) && (authors.length === 0 || !pubDate || !title || !siteName) && urlDerivedTitle) {
       const urlClean = cleanUrl.replace(/[?&]$/, "");
       // Clear bad data so LLM doesn't get influenced — we'll only keep what LLM returns
       let llmTitle = "";
@@ -602,15 +730,15 @@ Rules:
         // LLM fallback failed — keep whatever we have
       }
 
-      // Apply LLM results (overrides everything)
-      if (llmTitle) title = llmTitle;
-      if (llmSiteName) siteName = llmSiteName;
-      if (llmAuthors.length > 0) authors = llmAuthors;
-      if (llmVolume) volume = llmVolume;
-      if (llmIssue) issue = llmIssue;
-      if (llmPages) pages = llmPages;
-      if (llmDoi) doi = llmDoi;
-      if (llmPubDate) pubDate = llmPubDate;
+      // Apply LLM results (fills gaps only — don't override reliable OAI/Crossref data)
+      if (llmTitle && !title) title = llmTitle;
+      if (llmSiteName && !siteName) siteName = llmSiteName;
+      if (llmAuthors.length > 0 && authors.length === 0) authors = llmAuthors;
+      if (llmVolume && !volume) volume = llmVolume;
+      if (llmIssue && !issue) issue = llmIssue;
+      if (llmPages && !pages) pages = llmPages;
+      if (llmDoi && !doi) doi = llmDoi;
+      if (llmPubDate && !pubDate) pubDate = llmPubDate;
     }
 
     // Fallback date from regex if still missing
@@ -622,7 +750,7 @@ Rules:
     if (title || siteName) {
       return NextResponse.json({
         title: cleanString(title) || "",
-        siteName: cleanString(siteName) || "",
+        siteName: cleanJournalTitle(cleanString(siteName)) || "",
         authors: cleanAuthors(authors),
         pubDate: cleanString(pubDate),
         volume: cleanString(volume) || "",

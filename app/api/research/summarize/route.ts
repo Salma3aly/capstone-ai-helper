@@ -18,7 +18,7 @@ const REQUIRED_FIELDS = [
 const MAX_COMPLETION_TOKENS = 5000;
 
 function debugLog(location: string, message: string, data: Record<string, unknown>) {
-  // #region agent log
+  if (process.env.NODE_ENV !== "development") return;
   fetch("http://127.0.0.1:7430/ingest/35e7a5bc-92bf-4f9d-98ae-f97d5b186231", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "43cd19" },
@@ -31,7 +31,6 @@ function debugLog(location: string, message: string, data: Record<string, unknow
       hypothesisId: data.hypothesisId,
     }),
   }).catch(() => {});
-  // #endregion
 }
 
 function parseGroqError(err: unknown): string {

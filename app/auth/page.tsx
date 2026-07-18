@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, Mail, Lock, User, GraduationCap, Phone, Building2 } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, GraduationCap, Phone, Building2, Users, UserCheck } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 
 export default function AuthPage() {
@@ -9,7 +9,7 @@ export default function AuthPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [form, setForm] = useState({
     name: '', email: '', password: '', confirmPassword: '',
-    grade: '', phone: '', university: '',
+    userType: '', grade: '', phone: '', organization: '',
   });
   const [showPw, setShowPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
@@ -32,9 +32,10 @@ export default function AuthPage() {
         name: form.name, email: form.email, password: form.password,
       };
       if (mode === 'register') {
+        body.userType = form.userType;
         body.grade = form.grade;
         body.phone = form.phone;
-        body.university = form.university;
+        body.organization = form.organization;
       }
 
       const res = await fetch(`/api/auth/${mode}`, {
@@ -112,7 +113,39 @@ export default function AuthPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Grade / Academic Level</label>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">I am a...</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, userType: 'student' })}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 border rounded-lg text-sm font-medium transition ${
+                        form.userType === 'student'
+                          ? 'border-[#ec4899] bg-[#ec4899]/5 text-[#db2777]'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      <GraduationCap className="w-4 h-4" />
+                      Student
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, userType: 'mentor' })}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 border rounded-lg text-sm font-medium transition ${
+                        form.userType === 'mentor'
+                          ? 'border-[#ec4899] bg-[#ec4899]/5 text-[#db2777]'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      <UserCheck className="w-4 h-4" />
+                      Mentor
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">
+                    {form.userType === 'student' ? 'Grade' : 'Academic Level'}
+                  </label>
                   <div className="relative">
                     <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <select
@@ -120,14 +153,12 @@ export default function AuthPage() {
                       onChange={(e) => setForm({ ...form, grade: e.target.value })}
                       className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none bg-white appearance-none text-gray-700"
                     >
-                      <option value="">Select academic level...</option>
-                      <option value="High School">High School</option>
-                      <option value="Freshman">Freshman (1st Year)</option>
-                      <option value="Sophomore">Sophomore (2nd Year)</option>
-                      <option value="Junior">Junior (3rd Year)</option>
-                      <option value="Senior">Senior (4th Year)</option>
-                      <option value="Graduate">Graduate / Master's</option>
-                      <option value="PhD">PhD / Doctoral</option>
+                      <option value="">Select...</option>
+                      <option value="9">Grade 9</option>
+                      <option value="10">Grade 10</option>
+                      <option value="11">Grade 11</option>
+                      <option value="12">Grade 12</option>
+                      <option value="Undergraduate">Undergraduate</option>
                       <option value="Other">Other</option>
                     </select>
                   </div>
@@ -147,12 +178,12 @@ export default function AuthPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">University / Institution</label>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Organization</label>
                   <div className="relative">
                     <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
-                      type="text" value={form.university}
-                      onChange={(e) => setForm({ ...form, university: e.target.value })}
+                      type="text" value={form.organization}
+                      onChange={(e) => setForm({ ...form, organization: e.target.value })}
                       placeholder="e.g. Cairo University"
                       className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none"
                     />

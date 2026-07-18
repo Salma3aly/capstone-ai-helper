@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth/db";
-import { readStore, writeStore, removeFromArray } from "@/lib/storage/db";
+import { readStore, writeStore } from "@/lib/storage/db";
 import type { ResearchPaper } from "@/lib/research/types";
 
 function getUser(req: NextRequest) {

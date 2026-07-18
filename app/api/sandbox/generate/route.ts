@@ -3,6 +3,7 @@ import { buildGeneratePrompt } from "@/lib/sandbox/prompts";
 import { grokChatJSON } from "@/lib/sandbox/grok";
 import { COMPONENTS, BOARD_COMPONENTS } from "@/lib/sandbox/components";
 import { validateBuild } from "@/lib/sandbox/validate";
+import { findMissingControlLogic } from "@/lib/sandbox/actuators";
 import type { GenerateResponse, ValidationIssue } from "@/lib/sandbox/types";
 
 function detectLanguage(board: string): string {
@@ -42,6 +43,18 @@ export async function POST(req: Request) {
       { role: "user", content: prompt },
     ]);
 
+    // Self-check: verify generated code has control logic for every actuator in wiring
+    const missingControl = data.wiring && data.code
+      ? findMissingControlLogic(data.code, data.wiring)
+      : [];
+    if (missingControl.length > 0) {
+      issues.push({
+        severity: "warning",
+        message: `Generated code lacks control logic for: ${missingControl.join(", ")}. It reads sensors but does not drive these outputs.`,
+        componentId: missingControl[0],
+      });
+    }
+
     return NextResponse.json({
       ...data,
       validation: issues,
@@ -54,7 +67,9 @@ export async function POST(req: Request) {
       ? `The AI service has reached its daily token limit (${keyCount} key(s) configured). Please try again tomorrow or add more API keys.`
       : error instanceof Error && error.message.includes("429")
         ? "AI service is busy. Please wait a moment and try again."
-        : "Could not generate output. Please try again.";
+        : error instanceof Error
+          ? error.message
+          : "Could not generate output. Please try again.";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

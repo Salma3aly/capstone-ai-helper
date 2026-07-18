@@ -1,7 +1,7 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Save, Loader2, Camera, User, Mail, Phone, GraduationCap, Building2 } from 'lucide-react';
+import { Save, Loader2, Camera, User, Mail, Phone, GraduationCap, Building2, UserCheck } from 'lucide-react';
 import { useAuth } from '@/lib/context/AuthContext';
 
 export default function SettingsPage() {
@@ -14,9 +14,10 @@ export default function SettingsPage() {
   const [form, setForm] = useState({
     name: '',
     email: '',
+    userType: '',
     grade: '',
     phone: '',
-    university: '',
+    organization: '',
   });
 
   useEffect(() => {
@@ -25,9 +26,10 @@ export default function SettingsPage() {
       setForm({
         name: user.name || '',
         email: user.email || '',
+        userType: user.userType || '',
         grade: user.grade || '',
         phone: user.phone || '',
-        university: user.university || '',
+        organization: user.organization || '',
       });
     }
     const stored = localStorage.getItem('capstone_avatar');
@@ -114,19 +116,39 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b] mb-1">Email</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94a3b8]" />
-              <input
-                type="email" value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full pl-10 pr-4 py-2.5 border border-[#e2e8f0] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-[#0f172a]"
-              />
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b] mb-1">I am a...</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, userType: 'student' })}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 border rounded-lg text-sm font-medium transition ${
+                  form.userType === 'student'
+                    ? 'border-[#ec4899] bg-[#ec4899]/5 text-[#db2777]'
+                    : 'border-[#e2e8f0] text-[#64748b] hover:border-gray-300'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4" />
+                Student
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, userType: 'mentor' })}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 border rounded-lg text-sm font-medium transition ${
+                  form.userType === 'mentor'
+                    ? 'border-[#ec4899] bg-[#ec4899]/5 text-[#db2777]'
+                    : 'border-[#e2e8f0] text-[#64748b] hover:border-gray-300'
+                }`}
+              >
+                <UserCheck className="w-4 h-4" />
+                Mentor
+              </button>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b] mb-1">Grade / Academic Level</label>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b] mb-1">
+              {form.userType === 'student' ? 'Grade' : 'Academic Level'}
+            </label>
             <div className="relative">
               <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94a3b8]" />
               <select
@@ -134,14 +156,12 @@ export default function SettingsPage() {
                 onChange={(e) => setForm({ ...form, grade: e.target.value })}
                 className="w-full pl-10 pr-4 py-2.5 border border-[#e2e8f0] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-[#0f172a] bg-white appearance-none"
               >
-                <option value="">Select academic level...</option>
-                <option value="High School">High School</option>
-                <option value="Freshman">Freshman (1st Year)</option>
-                <option value="Sophomore">Sophomore (2nd Year)</option>
-                <option value="Junior">Junior (3rd Year)</option>
-                <option value="Senior">Senior (4th Year)</option>
-                <option value="Graduate">Graduate / Master&apos;s</option>
-                <option value="PhD">PhD / Doctoral</option>
+                <option value="">Select...</option>
+                <option value="9">Grade 9</option>
+                <option value="10">Grade 10</option>
+                <option value="11">Grade 11</option>
+                <option value="12">Grade 12</option>
+                <option value="Undergraduate">Undergraduate</option>
                 <option value="Other">Other</option>
               </select>
             </div>
@@ -161,12 +181,12 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b] mb-1">University / Institution</label>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b] mb-1">Organization</label>
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94a3b8]" />
               <input
-                type="text" value={form.university}
-                onChange={(e) => setForm({ ...form, university: e.target.value })}
+                type="text" value={form.organization}
+                onChange={(e) => setForm({ ...form, organization: e.target.value })}
                 placeholder="e.g. Cairo University"
                 className="w-full pl-10 pr-4 py-2.5 border border-[#e2e8f0] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] text-[#0f172a]"
               />

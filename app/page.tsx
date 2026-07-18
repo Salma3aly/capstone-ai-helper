@@ -1,10 +1,11 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Menu, X, ChevronDown, Sparkles, BookOpen, Beaker, BarChart3, MessageCircle, Send } from 'lucide-react';
+import { Menu, X, ChevronDown, Sparkles, BookOpen, Beaker, BarChart3, MessageCircle, Send, FileText } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { AiAvatar } from '@/components/AiAvatar';
 import HeroCarousel from '@/components/HeroCarousel';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 const NAV_ITEMS = [
   { label: 'Features', href: '#features' },
@@ -62,7 +63,7 @@ export default function HomePage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [showGreeting, setShowGreeting] = useState(true);
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([
-    { role: 'assistant', content: "Hey! I'm Lipo 👋 What are you building today?" },
+    { role: 'assistant', content: "Hey! I'm Lipo! What are you building today?" },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
@@ -112,11 +113,12 @@ export default function HomePage() {
 
   function renderMarkdown(text: string): string {
     if (!text) return '';
-    return text
+    const html = text
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
       .replace(/^\- (.+)$/gm, '• $1')
       .replace(/\n/g, '<br />');
+    return sanitizeHtml(html);
   }
 
   return (
@@ -256,22 +258,24 @@ export default function HomePage() {
             <p className="text-[#64748b] mt-2">Click any tool to start building.</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              { icon: '💬', title: 'Lipo AI Chat', href: '/chat' },
-              { icon: '🧪', title: 'Sandbox Wizard', href: '/sandbox' },
-              { icon: '📝', title: 'Citation Generator', href: '/citation' },
-              { icon: '📚', title: 'Research Hub', href: '/hub' },
-            ].map((tool) => (
-              <a
-                key={tool.title}
-                href={tool.href}
-                className="p-6 bg-white border border-[#e2e8f0] rounded-xl hover:shadow-md hover:border-[#fbcfe8]/20 transition group"
-              >
-                <div className="text-3xl mb-3">{tool.icon}</div>
-                <h3 className="font-bold text-[#0f172a] group-hover:text-[#db2777] transition">{tool.title}</h3>
-                <p className="text-xs text-[#64748b] mt-1">Click to open →</p>
-              </a>
-            ))}
+              {[
+                { icon: MessageCircle, title: 'Lipo AI Chat', href: '/chat' },
+                { icon: Beaker, title: 'Sandbox Wizard', href: '/sandbox' },
+                { icon: FileText, title: 'Citation Generator', href: '/citation' },
+                { icon: BookOpen, title: 'Research Hub', href: '/hub' },
+              ].map((tool) => (
+                <a
+                  key={tool.title}
+                  href={tool.href}
+                  className="p-6 bg-white border border-[#e2e8f0] rounded-xl hover:shadow-md hover:border-[#fbcfe8]/20 transition group"
+                >
+                  <div className="mb-3 flex items-center justify-center">
+                    <tool.icon className="w-8 h-8 text-[#db2777]" />
+                  </div>
+                  <h3 className="font-bold text-[#0f172a] group-hover:text-[#db2777] transition">{tool.title}</h3>
+                  <p className="text-xs text-[#64748b] mt-1">Click to open →</p>
+                </a>
+              ))}
           </div>
         </div>
       </section>

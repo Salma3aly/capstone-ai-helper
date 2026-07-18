@@ -10,12 +10,10 @@ const dmSans = DM_Sans({
 
 export const metadata: Metadata = {
   title: "Capstone",
-  description: "AI-powered project assistant — for students, makers, and anyone building something new",
-  icons: [
-    { rel: "icon", url: "/logo-icon.svg", type: "image/svg+xml" },
-    { rel: "icon", url: "/logo-icon.png", type: "image/png" },
-    { rel: "apple-touch-icon", url: "/logo-icon-128.png" },
-  ],
+  icons: {
+    icon: "/Logopp.png",
+    apple: "/Logopp.png",
+  },
 };
 
 export default function RootLayout({

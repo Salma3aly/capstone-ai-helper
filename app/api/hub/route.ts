@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db/connect";
 import { HubMessage } from "@/lib/db/models/HubMessage";
 import { HubChannel } from "@/lib/db/models/HubChannel";
-import { pusherServer } from "@/lib/pusher/server";
+import { getPusherServer } from "@/lib/pusher/server";
 import { verifyToken } from "@/lib/auth/db";
 
 interface Message {
@@ -87,7 +87,7 @@ export async function PUT(req: Request) {
     await HubChannel.create(newChannel);
 
     try {
-      await pusherServer.trigger("hub-global", "channel-created", newChannel);
+      await getPusherServer().trigger("hub-global", "channel-created", newChannel);
     } catch {}
 
     return NextResponse.json(newChannel);
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
     await HubMessage.create(newMessage);
 
     try {
-      await pusherServer.trigger(`hub-${channelId}`, "new-message", newMessage);
+      await getPusherServer().trigger(`hub-${channelId}`, "new-message", newMessage);
     } catch {}
 
     return NextResponse.json(newMessage);

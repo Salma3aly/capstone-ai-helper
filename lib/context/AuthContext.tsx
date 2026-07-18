@@ -6,9 +6,10 @@ export interface User {
   id?: string;
   name?: string;
   email?: string;
+  userType?: string;
   grade?: string;
   phone?: string;
-  university?: string;
+  organization?: string;
   avatar?: string;
 }
 

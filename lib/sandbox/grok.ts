@@ -1,8 +1,19 @@
 export const GROQ_BASE = "https://api.groq.com/openai/v1";
+const DEFAULT_TIMEOUT_MS = 60000;
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ─── Multi-key management ──────────────────────────────────────────────────
@@ -97,7 +108,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 5): P
     const key = getKey();
     const headers = new Headers(options.headers);
     headers.set("Authorization", `Bearer ${key}`);
-    const res = await fetch(url, { ...options, headers });
+    const res = await fetchWithTimeout(url, { ...options, headers });
 
     if (res.status !== 429) return res;
 
@@ -182,7 +193,7 @@ export function grokChatStream(
 
         for (let attempt = 0; attempt < ring.length; attempt++) {
           const key = getKey();
-          const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+          const res = await fetchWithTimeout(`${GROQ_BASE}/chat/completions`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -194,7 +205,7 @@ export function grokChatStream(
               max_tokens: maxTokens,
               stream: true,
             }),
-          });
+          }, 120000);
 
           // Handle 429 — mark exhausted and try next key
           if (res.status === 429) {
@@ -272,8 +283,28 @@ export function grokChatStream(
 }
 
 /**
+ * Escapes literal newlines inside JSON string values while preserving
+ * structural newlines. Models often output actual newlines inside the
+ * "code" string instead of \n, which makes JSON.parse fail.
+ */
+function repairJSON(raw: string): string {
+  let out = "";
+  let inStr = false;
+  let esc = false;
+  for (const ch of raw) {
+    if (esc) { out += ch; esc = false; continue; }
+    if (ch === "\\") { out += ch; esc = true; continue; }
+    if (ch === '"' && !esc) { inStr = !inStr; out += ch; continue; }
+    if (inStr && (ch === "\n" || ch === "\r")) { out += "\\n"; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+/**
  * Calls Grok and parses the response as JSON.
  * Strips markdown code fences if present.
+ * Attempts JSON repair on parse failure.
  */
 export async function grokChatJSON<T>(messages: ChatMessage[], model = "llama-3.3-70b-versatile", maxTokens = 2048): Promise<T> {
   const text = await grokChat(messages, model, maxTokens);
@@ -281,6 +312,11 @@ export async function grokChatJSON<T>(messages: ChatMessage[], model = "llama-3.
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    throw new Error(`Failed to parse AI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
+    const repaired = repairJSON(cleaned);
+    try {
+      return JSON.parse(repaired) as T;
+    } catch {
+      throw new Error(`Failed to parse AI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
+    }
   }
 }

@@ -169,7 +169,7 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
 function ChatPanel() {
   const { chatOpen, setChatOpen, messages, sendMessage, loading, input, setInput, chatEndRef, clearHistory } = useChat();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [showGreeting, setShowGreeting] = useState(true);
+  const [showGreeting, setShowGreeting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -178,6 +178,19 @@ function ChatPanel() {
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  // Only show greeting on first-time visits (no projects in either store)
+  useEffect(() => {
+    try {
+      const legacy = JSON.parse(localStorage.getItem('capstone-projects') || '[]');
+      const sandbox = JSON.parse(localStorage.getItem('sandbox_projects') || '[]');
+      if (legacy.length === 0 && sandbox.length === 0) {
+        setShowGreeting(true);
+      }
+    } catch {
+      setShowGreeting(false);
+    }
   }, []);
 
   return (

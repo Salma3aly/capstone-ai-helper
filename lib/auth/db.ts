@@ -1,82 +1,92 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import fs from "fs";
-import path from "path";
+import { connectDB } from "@/lib/db/connect";
+import { User, IUser } from "@/lib/db/models/User";
 
-const DB_PATH = path.join(process.cwd(), "data", "users.json");
-const JWT_SECRET = process.env.JWT_SECRET || "capstone-secret-key-change-in-production";
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is required");
+  }
+  return secret;
+}
 
-export interface User {
+export type { IUser as User };
+
+export interface SafeUser {
   id: string;
   name: string;
   email: string;
-  password: string;
+  userType?: string;
   grade?: string;
   phone?: string;
-  university?: string;
+  organization?: string;
   avatar?: string;
   createdAt: string;
 }
 
-export function readDb(): User[] {
-  try {
-    if (!fs.existsSync(DB_PATH)) return [];
-    return JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
-  } catch {
-    return [];
-  }
+function toSafe(user: IUser): SafeUser {
+  const { password, ...safe } = user;
+  return safe;
 }
 
-function writeDb(users: User[]) {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2));
+export async function findUserByEmail(email: string): Promise<IUser | null> {
+  await connectDB();
+  return User.findOne({ email }).lean();
 }
 
-export function findUserByEmail(email: string): User | undefined {
-  return readDb().find((u) => u.email === email);
+export async function findUserById(id: string): Promise<IUser | null> {
+  await connectDB();
+  return User.findOne({ id }).lean();
 }
 
 export async function createUser(
   name: string, email: string, password: string,
-  extra?: { grade?: string; phone?: string; university?: string }
-): Promise<User> {
-  const users = readDb();
+  extra?: { userType?: string; grade?: string; phone?: string; organization?: string }
+): Promise<IUser> {
+  await connectDB();
   const hashed = await bcrypt.hash(password, 10);
-  const user: User = {
+  const user = new User({
     id: Date.now().toString(),
     name,
     email,
     password: hashed,
+    userType: extra?.userType,
     grade: extra?.grade,
     phone: extra?.phone,
-    university: extra?.university,
+    organization: extra?.organization,
     createdAt: new Date().toISOString(),
-  };
-  users.push(user);
-  writeDb(users);
-  return user;
+  });
+  await user.save();
+  return user.toObject();
 }
 
-export function updateUser(id: string, updates: Partial<Omit<User, "id" | "password" | "createdAt">>): User | null {
-  const users = readDb();
-  const idx = users.findIndex((u) => u.id === id);
-  if (idx === -1) return null;
-  users[idx] = { ...users[idx], ...updates };
-  writeDb(users);
-  return users[idx];
+export async function updateUser(id: string, updates: Partial<Omit<IUser, "id" | "password" | "createdAt">>): Promise<SafeUser | null> {
+  await connectDB();
+  const user = await User.findOneAndUpdate(
+    { id },
+    { $set: updates },
+    { new: true }
+  ).lean();
+  if (!user) return null;
+  return toSafe(user);
 }
 
-export function signToken(user: Omit<User, "password">): string {
-  return jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, {
+export function signToken(user: IUser): string {
+  return jwt.sign({ id: user.id, email: user.email, name: user.name }, getJwtSecret(), {
     expiresIn: "7d",
   });
 }
 
-export function verifyToken(token: string): Omit<User, "password"> | null {
+export function verifyToken(token: string): SafeUser | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as Omit<User, "password">;
+    return jwt.verify(token, getJwtSecret()) as SafeUser;
   } catch {
     return null;
   }
+}
+
+export async function readDb(): Promise<IUser[]> {
+  await connectDB();
+  return User.find().lean();
 }

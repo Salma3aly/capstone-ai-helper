@@ -1,83 +1,65 @@
-import fs from "fs";
-import path from "path";
+import { connectDB } from "@/lib/db/connect";
+import { SandboxProjectModel, ISandboxProject } from "@/lib/db/models/SandboxProject";
+import { ResearchPaperModel, IResearchPaper } from "@/lib/db/models/ResearchPaper";
+import { LegacyProjectModel, ILegacyProject } from "@/lib/db/models/LegacyProject";
+import { ChatSessionModel, IChatSession } from "@/lib/db/models/ChatSession";
 
-type JsonValue = Record<string, unknown> | unknown[];
+type CollectionName = "sandbox_projects" | "research_papers" | "projects" | "chat_history";
 
-const locks = new Map<string, Promise<void>>();
-
-function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prev = locks.get(key) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
-  locks.set(key, next.then(() => {}, () => {}));
-  return next;
-}
-
-export function readJsonFile<T = JsonValue>(filePath: string): T {
-  try {
-    if (!fs.existsSync(filePath)) return (Array.isArray([]) ? [] : {}) as T;
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
-  } catch {
-    return (Array.isArray([]) ? [] : {}) as T;
+export async function readStore<T>(name: CollectionName): Promise<T> {
+  await connectDB();
+  switch (name) {
+    case "sandbox_projects": {
+      const docs = await SandboxProjectModel.find().lean();
+      return docs as unknown as T;
+    }
+    case "research_papers": {
+      const docs = await ResearchPaperModel.find().lean();
+      return docs as unknown as T;
+    }
+    case "projects": {
+      const docs = await LegacyProjectModel.find().lean();
+      return docs as unknown as T;
+    }
+    case "chat_history": {
+      const docs = await ChatSessionModel.find().lean();
+      return docs as unknown as T;
+    }
+    default:
+      return [] as unknown as T;
   }
 }
 
-export function writeJsonFile(filePath: string, data: unknown): void {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
-
-const DATA_DIR = path.join(process.cwd(), "data");
-
-export function dataPath(...segments: string[]): string {
-  return path.join(DATA_DIR, ...segments);
-}
-
-export async function readStore<T>(name: string): Promise<T> {
-  return withLock(name, async () => {
-    return readJsonFile<T>(dataPath(`${name}.json`));
-  });
-}
-
-export async function writeStore(name: string, data: unknown): Promise<void> {
-  return withLock(name, async () => {
-    writeJsonFile(dataPath(`${name}.json`), data);
-  });
-}
-
-export async function appendToArray<T>(name: string, item: T): Promise<T[]> {
-  return withLock(name, async () => {
-    const arr = readJsonFile<T[]>(dataPath(`${name}.json`));
-    arr.push(item);
-    writeJsonFile(dataPath(`${name}.json`), arr);
-    return arr;
-  });
-}
-
-export async function updateInArray<T extends { id: string }>(
-  name: string,
-  id: string,
-  updater: (item: T) => T
-): Promise<T | null> {
-  return withLock(name, async () => {
-    const arr = readJsonFile<T[]>(dataPath(`${name}.json`));
-    const idx = arr.findIndex((i) => i.id === id);
-    if (idx === -1) return null;
-    arr[idx] = updater(arr[idx]);
-    writeJsonFile(dataPath(`${name}.json`), arr);
-    return arr[idx];
-  });
-}
-
-export async function removeFromArray<T extends { id: string }>(
-  name: string,
-  id: string
-): Promise<boolean> {
-  return withLock(name, async () => {
-    const arr = readJsonFile<T[]>(dataPath(`${name}.json`));
-    const filtered = arr.filter((i) => i.id !== id);
-    if (filtered.length === arr.length) return false;
-    writeJsonFile(dataPath(`${name}.json`), filtered);
-    return true;
-  });
+export async function writeStore(name: CollectionName, data: unknown): Promise<void> {
+  await connectDB();
+  switch (name) {
+    case "sandbox_projects": {
+      await SandboxProjectModel.deleteMany({});
+      if (Array.isArray(data)) {
+        await SandboxProjectModel.insertMany(data as ISandboxProject[]);
+      }
+      break;
+    }
+    case "research_papers": {
+      await ResearchPaperModel.deleteMany({});
+      if (Array.isArray(data)) {
+        await ResearchPaperModel.insertMany(data as IResearchPaper[]);
+      }
+      break;
+    }
+    case "projects": {
+      await LegacyProjectModel.deleteMany({});
+      if (Array.isArray(data)) {
+        await LegacyProjectModel.insertMany(data as ILegacyProject[]);
+      }
+      break;
+    }
+    case "chat_history": {
+      await ChatSessionModel.deleteMany({});
+      if (Array.isArray(data)) {
+        await ChatSessionModel.insertMany(data as IChatSession[]);
+      }
+      break;
+    }
+  }
 }

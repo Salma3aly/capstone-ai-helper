@@ -16,6 +16,7 @@ import {
 } from "@/lib/sandbox/store";
 import { BreadboardSimulator } from "@/components/sandbox/BreadboardSimulator";
 import { BOARD_COMPONENTS, COMPONENTS } from "@/lib/sandbox/components";
+import { findActionFeaturesWithoutActuators, findMissingControlLogic } from "@/lib/sandbox/actuators";
 import type { RamProduct } from "@/lib/sandbox/ram";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
@@ -91,6 +92,39 @@ export default function SandboxBuilder({
   // ── Diagram fullscreen ────────────────────────────────────────────
   const [diagramFullscreen, setDiagramFullscreen] = useState(false);
 
+  const DRAFT_KEY = `sandbox_draft_${id}`;
+
+  const saveDraftToLocal = useCallback(() => {
+    const draft = {
+      project,
+      analysisDraft,
+      componentsDraft,
+      wiringDraft,
+      codeDraft,
+      hardwareBoard,
+      hardwareSensors,
+      sensorNames,
+      hardwareWiring,
+      hardwareRecommendation,
+    };
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch { /* storage full */ }
+  }, [project, analysisDraft, componentsDraft, wiringDraft, codeDraft,
+      hardwareBoard, hardwareSensors, sensorNames, hardwareWiring, hardwareRecommendation]);
+
+  const debouncedSaveDraft = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (loading) return;
+    clearTimeout(debouncedSaveDraft.current!);
+    debouncedSaveDraft.current = setTimeout(saveDraftToLocal, 500);
+    return () => clearTimeout(debouncedSaveDraft.current!);
+  }, [saveDraftToLocal, loading]);
+
+  const clearDraft = useCallback(() => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+  }, [DRAFT_KEY]);
+
   // ── Hardware wiring refs (must be before load project useEffect) ──
   const autoRecalcEnabled = useRef(false);
   const initialHwTriggered = useRef(false);
@@ -102,6 +136,29 @@ export default function SandboxBuilder({
       return;
     }
     setLoading(true);
+
+    // Restore from localStorage first (unsaved drafts survive navigation)
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        if (draft.project) {
+          setProject(draft.project);
+          setAnalysisDraft(draft.analysisDraft);
+          setComponentsDraft(draft.componentsDraft);
+          setWiringDraft(draft.wiringDraft);
+          setCodeDraft(draft.codeDraft);
+          if (draft.hardwareBoard) setHardwareBoard(draft.hardwareBoard);
+          if (draft.hardwareSensors) setHardwareSensors(draft.hardwareSensors);
+          if (draft.sensorNames) setSensorNames(draft.sensorNames);
+          if (draft.hardwareWiring) setHardwareWiring(draft.hardwareWiring);
+          if (draft.hardwareRecommendation) setHardwareRecommendation(draft.hardwareRecommendation);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch { /* corrupted draft, ignore */ }
+
     getProject(id)
       .then((p) => {
         setProject(p);
@@ -262,12 +319,13 @@ export default function SandboxBuilder({
     try {
       const updated = await updateProject(project.id, updates);
       setProject(updated);
+      clearDraft();
     } catch {
       setError("Failed to save progress");
     } finally {
       setSaving(false);
     }
-  }, [project, stage, analysisDraft, componentsDraft, wiringDraft, codeDraft, hardwareBoard, hardwareSensors, sensorNames, hardwareWiring, hardwareRecommendation]);
+  }, [project, stage, analysisDraft, componentsDraft, wiringDraft, codeDraft, hardwareBoard, hardwareSensors, sensorNames, hardwareWiring, hardwareRecommendation, clearDraft]);
 
   const goBackStage = useCallback(async () => {
     if (!project) return;
@@ -405,6 +463,15 @@ export default function SandboxBuilder({
         };
         setCodeDraft(arduinoCode);
         setHardwareWiring(data.wiring || []);
+
+        // Self-check: verify code has control logic for every actuator in wiring
+        if (data.wiring?.length > 0 && data.code) {
+          const missingLogic = findMissingControlLogic(data.code, data.wiring);
+          if (missingLogic.length > 0) {
+            setError(`The generated code reads sensors but lacks control logic for: ${missingLogic.join(", ")}. Regenerate or add digitalWrite/analogWrite calls to drive these components.`);
+          }
+        }
+
         const updated = await updateProject(project.id, { code: arduinoCode, stage: "code", hardwareWiring: data.wiring || [] });
         setProject(updated);
       } catch {
@@ -494,6 +561,15 @@ export default function SandboxBuilder({
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       setHardwareWiring(data.wiring || []);
+
+      // Cross-check: core features that imply physical actions need actuators
+      if (project.analysis?.core_features && project.analysis.core_features.length > 0) {
+        const missing = findActionFeaturesWithoutActuators(project.analysis.core_features, hardwareSensors);
+        if (missing.length > 0) {
+          const names = missing.map((m) => `"${m.feature}" (needs ${m.matchedKeyword})`).join("; ");
+          setError(`Your project includes ${names}, but no actuator (pump/relay/motor/buzzer, etc.) is selected. Add one to enable this feature, or move it to Out of Scope.`);
+        }
+      }
     } catch {
       setError("Hardware wiring generation failed.");
     } finally {
@@ -544,6 +620,7 @@ export default function SandboxBuilder({
       if (stage === "code") updates.code = codeDraft!;
       const updated = await updateProject(project.id, updates);
       setProject(updated);
+      clearDraft();
 
       // Sync to My Projects (localStorage under capstone-projects key)
       const boardComp = BOARD_COMPONENTS.find((c) => c.id === hardwareBoard);
@@ -721,11 +798,15 @@ export default function SandboxBuilder({
             {/* Stack */}
             <div className="bg-[#fdf2f8] border border-[#fbcfe8] rounded-xl p-4">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-[#ec4899] mb-2">Suggested Stack</h4>
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div><span className="text-[#64748b] text-xs">Frontend</span><p className="font-medium text-[#0f172a]">{componentsDraft.suggested_stack?.frontend || "—"}</p></div>
-                <div><span className="text-[#64748b] text-xs">Backend</span><p className="font-medium text-[#0f172a]">{componentsDraft.suggested_stack?.backend || "—"}</p></div>
-                <div><span className="text-[#64748b] text-xs">Database</span><p className="font-medium text-[#0f172a]">{componentsDraft.suggested_stack?.database || "—"}</p></div>
-              </div>
+              {(componentsDraft.suggested_stack?.frontend || "").startsWith("Not applicable") ? (
+                <p className="text-sm text-[#64748b] italic">{componentsDraft.suggested_stack.frontend}</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div><span className="text-[#64748b] text-xs">Frontend</span><p className="font-medium text-[#0f172a]">{componentsDraft.suggested_stack?.frontend || "—"}</p></div>
+                  <div><span className="text-[#64748b] text-xs">Backend</span><p className="font-medium text-[#0f172a]">{componentsDraft.suggested_stack?.backend || "—"}</p></div>
+                  <div><span className="text-[#64748b] text-xs">Database</span><p className="font-medium text-[#0f172a]">{componentsDraft.suggested_stack?.database || "—"}</p></div>
+                </div>
+              )}
             </div>
 
             {/* Pages */}
@@ -844,139 +925,187 @@ export default function SandboxBuilder({
       return typeof raw === "string" ? raw : String(raw);
     };
 
-    // ── Architecture Diagram (dynamic from wiringDraft nodes/edges) ──
-    const LANE_Y = [90, 200, 310, 420];
-    const LANE_LABELS = ["External / Input", "Client / UI", "Services / Logic", "Data / Storage"];
-
-    // Brand palette — all from the actual Capstone brand family
+    // ── Architecture Diagram (column-based pipeline layout, left→right) ──
     const COLORS = {
       page:     "#ec4899",
       service:  "#a855f7",
       database: "#8b5cf6",
       external: "#3b82f6",
       arrow:    "#94a3b8",
-      laneEven: "#f8fafc",
-      laneOdd:  "#f1f5f9",
+      colEven:  "#f8fafc",
+      colOdd:   "#f1f5f9",
     };
 
-    const TYPE_LANE: Record<string, number> = {
-      external: 0,
-      page: 1,
-      service: 2,
-      database: 3,
+    const COLUMN_ORDER = ["external", "page", "service"] as const;
+    const COLUMN_LABELS: Record<string, string> = {
+      external: "External / Input",
+      page:     "Client / UI",
+      service:  "Services / Logic",
     };
 
-    // Compute positions from actual nodes, auto-sizing canvas
+    const NODE_H = 36;
+    const NODE_GAP_Y = 50;
+
+    // Compute column-based positions with auto-sized nodes
     function getDiagramLayout(nodes: WiringNode[], edges: WiringEdge[]) {
-      const byLane: Record<number, WiringNode[]> = {};
+      const maxChars = Math.max(1, ...nodes.map((n) => n.label.length));
+      const nodeW = Math.max(140, Math.min(maxChars * 7.5 + 24, 260));
+      const colGap = Math.max(60, nodeW * 0.6);
+      const pad = 60;
+
+      // Group non-database by type; collect database separately
+      const dbs: WiringNode[] = [];
+      const groups: Record<string, WiringNode[]> = { external: [], page: [], service: [] };
       for (const n of nodes) {
-        const lane = TYPE_LANE[n.type] ?? 1;
-        if (!byLane[lane]) byLane[lane] = [];
-        byLane[lane].push(n);
+        if (n.type === "database") dbs.push(n);
+        else if (groups[n.type]) groups[n.type].push(n);
       }
+
+      // Compute column X positions (only for populated columns)
+      let cursor = pad;
+      const colX: Record<string, number> = {};
+      let contentRight = pad;
+      const colMeta: { type: string; x: number; w: number; label: string }[] = [];
+      for (const type of COLUMN_ORDER) {
+        const g = groups[type];
+        if (g.length === 0) continue;
+        colX[type] = cursor;
+        colMeta.push({ type, x: cursor, w: nodeW + colGap, label: COLUMN_LABELS[type] });
+        cursor += nodeW + colGap;
+        contentRight = cursor;
+      }
+
+      // Position non-database nodes
+      const topY = 70;
       const positions: Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> = {};
-      let maxLane = 0;
-      for (const k of Object.keys(byLane)) maxLane = Math.max(maxLane, Number(k));
-      const maxPerLane = Math.max(1, ...Object.values(byLane).map((a) => a.length));
-      const viewW = Math.max(1200, maxPerLane * 280);
-      const viewH = 520;
-      const hPad = Math.max(80, viewW * 0.08);
-      for (let lane = 0; lane <= maxLane; lane++) {
-        const laneNodes = byLane[lane] || [];
-        const count = laneNodes.length;
-        if (count === 0) continue;
-        const available = viewW - 2 * hPad;
-        const gap = count > 1 ? available / (count - 1) : 0;
-        laneNodes.forEach((node, i) => {
-          const isInput = lane === 0;
+      let mainBottom = topY;
+      for (const type of COLUMN_ORDER) {
+        const g = groups[type];
+        if (g.length === 0) continue;
+        const cx = colX[type] + nodeW / 2;
+        g.forEach((node, i) => {
+          const y = topY + i * (NODE_H + NODE_GAP_Y);
+          mainBottom = Math.max(mainBottom, y + NODE_H);
           positions[node.id] = {
-            x: hPad + i * gap,
-            y: LANE_Y[lane],
-            w: 136,
-            h: isInput ? 28 : 36,
-            lane,
+            x: cx, y: y + NODE_H / 2, w: nodeW, h: NODE_H, lane: 1,
             color: COLORS[node.type] || COLORS.service,
           };
         });
       }
 
-      // Self-check: ensure every node referenced by edges has a position
-      // If missing, auto-create a position in lane 1 (fallback)
+      // Database row below
+      let dbTopY = mainBottom + 100;
+      if (dbs.length > 0) {
+        const dbStartX = pad + nodeW / 2;
+        dbs.forEach((node, i) => {
+          const cx = dbStartX + i * (nodeW + 30);
+          mainBottom = Math.max(mainBottom, dbTopY + NODE_H);
+          positions[node.id] = {
+            x: cx, y: dbTopY + NODE_H / 2, w: nodeW, h: NODE_H, lane: 3,
+            color: COLORS[node.type] || COLORS.database,
+          };
+        });
+      }
+
+      // Orphan resolution
       let orphanCount = 0;
       for (const edge of edges) {
         if (!positions[edge.from]) {
-          const orphanIdx = Object.keys(positions).length + orphanCount;
-          positions[edge.from] = {
-            x: hPad + (orphanIdx % Math.max(1, Math.floor(((viewW - 2 * hPad)) / 200))) * 200,
-            y: LANE_Y[1],
-            w: 136, h: 36, lane: 1,
-            color: COLORS.service,
-          };
+          const ox = contentRight + orphanCount * (nodeW + 20) + nodeW / 2;
+          positions[edge.from] = { x: ox, y: topY + NODE_H / 2, w: nodeW, h: NODE_H, lane: 1, color: COLORS.service };
+          contentRight = ox + nodeW / 2 + 20;
           orphanCount++;
         }
         if (!positions[edge.to]) {
-          const orphanIdx = Object.keys(positions).length + orphanCount;
-          positions[edge.to] = {
-            x: hPad + (orphanIdx % Math.max(1, Math.floor(((viewW - 2 * hPad)) / 200))) * 200,
-            y: LANE_Y[1],
-            w: 136, h: 36, lane: 1,
-            color: COLORS.service,
-          };
+          const ox = contentRight + orphanCount * (nodeW + 20) + nodeW / 2;
+          positions[edge.to] = { x: ox, y: topY + NODE_H / 2 + (orphanCount > 0 ? NODE_H + 20 : 0), w: nodeW, h: NODE_H, lane: 1, color: COLORS.service };
+          contentRight = ox + nodeW / 2 + 20;
           orphanCount++;
         }
       }
 
-      return { positions, viewW, viewH, maxPerLane, orphanCount };
+      const viewW = Math.max(800, contentRight + pad);
+      const viewH = Math.max(400, mainBottom + 80);
+
+      return { positions, viewW, viewH, nodeW, colMeta, groups, dbs, orphanCount, pad };
     }
 
-    // Edge path with same-lane arc routing
-    function getEdgePath(from: { x: number; y: number; h: number; lane: number }, to: typeof from): string {
-      const x1 = from.x, y1 = from.y + from.h / 2;
-      const x2 = to.x, y2 = to.y - to.h / 2;
+    // Edge path with orthogonal right-angle routing + channel offset
+    function getEdgePath(
+      from: { x: number; y: number; w: number; h: number; lane: number },
+      to: typeof from,
+      channel: number
+    ): string {
+      const x1 = from.x, y1 = from.y;
+      const x2 = to.x, y2 = to.y;
+      const ch = channel * 10;
+      const hw = from.w / 2;
+
+      // Same column — gentle arc to avoid labels
       if (from.lane === to.lane) {
-        const midY = Math.min(y1, y1 - 80 - Math.abs(x1 - x2) * 0.15);
-        return `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${midY}, ${x2} ${y2}`;
+        const midY = Math.min(y1, y2) - 30 - Math.abs(ch);
+        return `M ${x1} ${y1 - from.h / 2} Q ${(x1 + x2) / 2} ${midY}, ${x2} ${y2 + to.h / 2}`;
       }
-      const cy = (y1 + y2) / 2;
-      return `M ${x1} ${y1} C ${x1} ${cy}, ${x2} ${cy}, ${x2} ${y2}`;
+
+      // Cross-column: orthogonal right-angle routing
+      const xStart = x1 + hw + Math.abs(ch);
+      const xEnd = x2 - to.w / 2 - Math.abs(ch);
+      const yMid = (y1 + y2) / 2;
+
+      return `M ${x1 + hw} ${y1} L ${xStart} ${y1} L ${xStart} ${yMid} L ${xEnd} ${yMid} L ${xEnd} ${y2} L ${x2 - to.w / 2} ${y2}`;
     }
 
     // Reusable SVG diagram renderer
     const renderDiagramSvg = (wide: number, high: number, mini: boolean) => {
       const nodes = wiringDraft?.nodes || [];
       const edges = wiringDraft?.edges || [];
-      const { positions, orphanCount } = getDiagramLayout(nodes, edges);
+      const { positions, nodeW, colMeta, groups, dbs, orphanCount, pad } = getDiagramLayout(nodes, edges);
+      const maxGroupLen = Math.max(1, ...Object.values(groups).flatMap((g) => g.length));
+      const colH = maxGroupLen * (NODE_H + NODE_GAP_Y) + 80;
 
       return (
-        <svg viewBox={`0 0 ${wide} ${high}`} className="w-full h-auto" style={{ minWidth: mini ? 'auto' : '850px', maxHeight: mini ? `${high}px` : '540px' }}>
+        <svg viewBox={`0 0 ${wide} ${high}`} className="w-full h-auto" style={{ minWidth: mini ? 'auto' : '700px', maxHeight: mini ? `${high}px` : '540px' }}>
           <defs>
             <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
               <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodOpacity="0.14" />
             </filter>
-            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 1 L 9 5 L 0 9 z" fill={COLORS.arrow} />
             </marker>
           </defs>
 
-          {/* Lane backgrounds */}
-          {LANE_Y.map((y, i) => (
-            <g key={`lane-${i}`}>
-              <rect x={0} y={y - 38} width={wide} height={76} fill={i % 2 === 0 ? COLORS.laneEven : COLORS.laneOdd} rx="6" />
-              <line x1={0} y1={y - 38} x2={wide} y2={y - 38} stroke="#e2e8f0" strokeWidth="1" />
-              <text x={14} y={y - 19} textAnchor="start" className="text-[8px] font-medium uppercase tracking-wider" fill="#94a3b8">{LANE_LABELS[i]}</text>
+          {/* Column backgrounds */}
+          {colMeta.map((col, i) => (
+            <g key={`col-${col.type}`}>
+              <rect x={col.x - 20} y={8} width={col.w} height={colH} fill={i % 2 === 0 ? COLORS.colEven : COLORS.colOdd} rx="8" />
+              {i > 0 && <line x1={col.x - 20} y1={8} x2={col.x - 20} y2={8 + colH} stroke="#e2e8f0" strokeWidth="1" />}
+              <text x={col.x + nodeW / 2} y={28} textAnchor="middle" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">{col.label}</text>
             </g>
           ))}
 
-          {/* Edges — one visible line per edge entry */}
+          {/* Database area background */}
+          {dbs.length > 0 && (
+            <g>
+              <rect x={pad - 20} y={Math.max(...dbs.map((n) => positions[n.id]?.y ?? 0)) - NODE_H / 2 - 12} width={dbs.length * (nodeW + 30) + 40} height={NODE_H + 24} fill={COLORS.colOdd} rx="8" />
+              <text x={pad - 8} y={Math.max(...dbs.map((n) => positions[n.id]?.y ?? 0)) - NODE_H / 2 - 12 + 16} textAnchor="start" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">Data / Storage</text>
+            </g>
+          )}
+
+          {/* Edges with channel offset for overlap avoidance */}
           {edges.map((edge, i) => {
             const from = positions[edge.from];
             const to = positions[edge.to];
             if (!from || !to) return null;
-            const d = getEdgePath(from, to);
+            const d = getEdgePath(from, to, i);
+            // Label midpoint: horizontal segment center for cross-column, arc apex for same-column
+            const labelX = from.lane === to.lane ? (from.x + to.x) / 2 : (from.x + to.x) / 2;
+            const labelY = from.lane === to.lane
+              ? Math.min(from.y, to.y) - 46 - i * 10
+              : ((from.y + to.y) / 2) - 6 + (i % 2 === 0 ? -8 : 8) * Math.ceil((i + 1) / 2);
             return (
               <g key={`edge-${i}`}>
                 <path d={d} fill="none" stroke={COLORS.arrow} strokeWidth="1.5" markerEnd="url(#arrow)" />
-                <text x={(from.x + to.x) / 2} y={from.lane === to.lane ? Math.min(from.y, to.y) - 46 : ((from.y + from.h / 2) + (to.y - to.h / 2)) / 2 - 6} textAnchor="middle" className="text-[8px] font-medium" fill="#64748b">{edge.label}</text>
+                <text x={labelX} y={labelY} textAnchor="middle" className="text-[7.5px] font-medium" fill="#64748b">{edge.label}</text>
               </g>
             );
           })}
@@ -984,11 +1113,12 @@ export default function SandboxBuilder({
           {/* Nodes */}
           {Object.entries(positions).map(([id, pos]) => {
             const label = nodes.find((n) => n.id === id)?.label || id;
+            const isDb = pos.lane === 3;
             return (
               <g key={`node-${id}`}>
-                <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={pos.h} rx={pos.lane === 0 ? 4 : 9} fill={pos.color} filter="url(#shadow)" />
-                {pos.lane !== 0 && <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={3.5} rx={1.5} fill="white" fillOpacity="0.18" />}
-                <text x={pos.x} y={pos.y + 4.5} textAnchor="middle" className={`text-[${pos.lane === 0 ? 10 : 11}px] font-bold`} fill="white">{label}</text>
+                <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={pos.h} rx={isDb ? 9 : 9} fill={pos.color} filter="url(#shadow)" />
+                {!isDb && <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={3.5} rx={1.5} fill="white" fillOpacity="0.18" />}
+                <text x={pos.x} y={pos.y + 4.5} textAnchor="middle" className="text-[11px] font-bold" fill="white">{label}</text>
               </g>
             );
           })}
@@ -1027,15 +1157,9 @@ export default function SandboxBuilder({
       }
     };
 
-    const VIEW_W = Math.max(1200, Math.max(1, ...Object.values(
-      (wiringDraft?.nodes || []).reduce((acc, n) => {
-        const lane = TYPE_LANE[n.type] ?? 1;
-        if (!acc[lane]) acc[lane] = [];
-        acc[lane].push(n);
-        return acc;
-      }, {} as Record<number, WiringNode[]>)
-    ).map((a) => a.length)) * 280);
-    const VIEW_H = 520;
+    const layout = getDiagramLayout(wiringDraft?.nodes || [], wiringDraft?.edges || []);
+    const VIEW_W = layout.viewW;
+    const VIEW_H = layout.viewH;
 
     return (
       <div className="max-w-4xl mx-auto space-y-6">
