@@ -131,30 +131,56 @@ function stripTrailingPeriod(s: string): string {
   return s.replace(/\.+$/, "");
 }
 
+/** Extract a clean site name from a URL domain (e.g. "https://www.elindependiente.com/..." → "El Independiente") */
+function extractDomain(url: string): string {
+  if (!url) return "";
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./i, "");
+    return hostname
+      .split(".")
+      .slice(0, -1) // remove TLD
+      .join(" ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  } catch {
+    return "";
+  }
+}
+
 export function formatCitation(source: Source, style: CitationStyle): string {
   const author = formatAuthors(source.authors, style);
   const title = source.title || "Untitled";
-  const site = source.siteName || "Website";
   const date = formatDate(source.pubDate || "");
+
+  // Derive site: use provided name, fall back to domain from URL, or empty
+  const rawSite = source.siteName || extractDomain(source.url) || "";
+
+  // Build the site segment with leading/trailing punctuation for each style
+  function siteSegment(prefix: string, suffix: string): string {
+    return rawSite ? `${prefix}${rawSite}${suffix}` : "";
+  }
 
   // No authors → software/web resource: suppress all journal metadata
   if (!author) {
     switch (style) {
       case "APA": {
         const datePart = date ? `(${date})` : "(n.d.)";
-        let out = `${site}. ${datePart}. ${stripTrailingPeriod(title)}`;
+        const s = siteSegment("", ". ");
+        let out = s ? `${s}${datePart}. ${stripTrailingPeriod(title)}` : `${datePart}. ${stripTrailingPeriod(title)}`;
         return out;
       }
       case "MLA": {
         const datePart = date ? ` ${date}` : " n.d.";
-        return `"${stripTrailingPeriod(title)}." ${site}${datePart}.`;
+        const s = siteSegment("", "");
+        return `"${stripTrailingPeriod(title)}."${s ? ` ${s}` : ""}${datePart}.`;
       }
       case "IEEE": {
         const datePart = date ? ` ${date}` : "";
-        return `"${stripTrailingPeriod(title)}." ${site}${datePart}.`;
+        const s = siteSegment("", "");
+        return `"${stripTrailingPeriod(title)}."${s ? ` ${s}` : ""}${datePart}.`;
       }
       case "AMA": {
-        let out = `${stripTrailingPeriod(title)}. ${site}.`;
+        const s = siteSegment("", ".");
+        let out = s ? `${stripTrailingPeriod(title)}. ${s}` : `${stripTrailingPeriod(title)}.`;
         if (date) out += ` ${date}`;
         return out;
       }
@@ -166,11 +192,12 @@ export function formatCitation(source: Source, style: CitationStyle): string {
   switch (style) {
     case "APA": {
       const datePart = date ? `(${date})` : "(n.d.)";
-      const vol = journalVol(site, source.volume, source.number);
+      const vol = rawSite ? journalVol(rawSite, source.volume, source.number) : "";
       const artNum = isArticleNumber(source.pages) ? `Article ${source.pages}` : "";
       const pp = !isArticleNumber(source.pages) && source.pages ? `. ${source.pages}` : "";
       const doi = doiStr(source.doi);
-      let out = `${author} ${datePart}. ${stripTrailingPeriod(title)}. ${vol}`;
+      let out = `${author} ${datePart}. ${stripTrailingPeriod(title)}.`;
+      if (vol) out += ` ${vol}`;
       if (artNum) out += `, ${artNum}`;
       if (pp) out += pp;
       if (doi) out += `.${doi}`;
@@ -179,24 +206,28 @@ export function formatCitation(source: Source, style: CitationStyle): string {
 
     case "MLA": {
       const datePart = date ? ` ${date}` : " n.d.";
+      const s = siteSegment("", "");
       let vol = "";
       if (source.volume) vol += `, vol. ${source.volume}`;
       if (source.number) vol += `, no. ${source.number}`;
       const isRange = source.pages && source.pages.includes("-");
       const pp = pagesStr(source.pages, isRange ? "pp" : "p");
       const doi = doiStr(source.doi);
-      return `${stripTrailingPeriod(author)}. "${stripTrailingPeriod(title)}." ${site}${vol}${pp}${datePart}.${doi}`;
+      const middle = [s, vol].filter(Boolean).join("") + pp;
+      return `${stripTrailingPeriod(author)}. "${stripTrailingPeriod(title)}."${middle ? ` ${middle}` : ""}${datePart}.${doi}`;
     }
 
     case "IEEE": {
       const datePart = date ? ` ${date}` : "";
+      const s = siteSegment("", "");
       let vol = "";
       if (source.volume) vol += `, vol. ${source.volume}`;
       if (source.number) vol += `, no. ${source.number}`;
       const artNum = isArticleNumber(source.pages) ? `, art. no. ${source.pages}` : "";
       const pp = !isArticleNumber(source.pages) && source.pages ? `, pp. ${source.pages}` : "";
       const doi = doiStr(source.doi);
-      return `${author}, "${stripTrailingPeriod(title)}," ${site}${vol}${pp}${artNum}${datePart}.${doi}`;
+      const middle = [s, vol].filter(Boolean).join("") + pp + artNum;
+      return `${author}, "${stripTrailingPeriod(title)},"${middle ? ` ${middle}` : ""}${datePart}.${doi}`;
     }
 
     case "AMA": {
@@ -205,7 +236,9 @@ export function formatCitation(source: Source, style: CitationStyle): string {
       if (source.number) volIssue += `(${source.number})`;
       const colonPages = source.pages ? `:${source.pages}` : "";
       const doi = doiStr(source.doi);
-      let out = `${stripTrailingPeriod(author)}. ${stripTrailingPeriod(title)}. ${site}.`;
+      const s = siteSegment("", ".");
+      let out = `${stripTrailingPeriod(author)}. ${stripTrailingPeriod(title)}.`;
+      if (s) out += ` ${s}`;
       if (date) out += ` ${date}`;
       if (volIssue) out += `;${volIssue}${colonPages}.`;
       if (doi) out += `${doi}`;
