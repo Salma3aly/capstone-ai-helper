@@ -183,6 +183,25 @@ export function extractAuthorsFromPdfText(pdfText: string): string[] {
   return result;
 }
 
+/**
+ * Fetch only the page range from Crossref via a direct DOI lookup.
+ * Never falls back to title search — avoids wrong-article risk.
+ */
+export async function fetchCrossrefPagesByDoi(doi: string): Promise<string> {
+  try {
+    const cleanDoi = doi.replace(/^https?:\/\/doi\.org\//i, "");
+    const res = await fetch(`https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`, {
+      headers: { "User-Agent": "CapstoneAcademicApp/1.0 (mailto:capstone@example.com)" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return "";
+    const json = await res.json();
+    return json.message?.page || "";
+  } catch {
+    return "";
+  }
+}
+
 function formatCrossrefItem(item: any): AcademicMetadata {
   const title = item.title?.[0] || "Unknown Title";
   const authors = extractSoftwareAuthors(item);

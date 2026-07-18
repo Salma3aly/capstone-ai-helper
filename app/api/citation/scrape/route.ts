@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { grokChatJSON } from "@/lib/sandbox/grok";
-import { extractMetadataFromDoiOrTitle, extractAuthorsFromPdfText } from "@/lib/citation/metadataFetcher";
+import { extractMetadataFromDoiOrTitle, extractAuthorsFromPdfText, fetchCrossrefPagesByDoi } from "@/lib/citation/metadataFetcher";
 
 /** Check if a URL looks like a direct PDF file link */
 function isPdfUrl(urlStr: string): boolean {
@@ -759,6 +759,16 @@ export async function POST(req: Request) {
       if (crossrefData.pages && !fetchFailed && html && html.length > 50) pages = crossrefData.pages;
       if (crossrefData.doi && !fetchFailed && html && html.length > 50) doi = crossrefData.doi;
       if (crossrefData.year) pubDate = crossrefData.year;
+    }
+
+    // Step 4b: If OAI-PMH gave only a single page number, try direct Crossref DOI
+    // lookup for the full page range — gated on confirmed DOI only, no title search.
+    if (doi && (!pages || !pages.includes("-"))) {
+      const crossrefPages = await fetchCrossrefPagesByDoi(doi);
+      // Only use Crossref pages if they contain a range (has dash), not a bare number
+      if (crossrefPages && crossrefPages.includes("-")) {
+        pages = crossrefPages;
+      }
     }
     // Meta fills any gaps the baseline left empty
     if (!title) title = metaResult?.title || titleFromUrlPath(parsedUrl.pathname) || "";
