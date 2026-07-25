@@ -214,6 +214,22 @@ export default function SandboxBuilder({
     return () => clearTimeout(timer);
   }, [hardwareBoard, hardwareSensors.join(",")]);
 
+  // Automated check: make sure relay/mosfet driver is selected if high-power actuator is selected
+  useEffect(() => {
+    if (hardwareSensors.includes("water-pump") || hardwareSensors.includes("solenoid-lock")) {
+      if (!hardwareSensors.includes("relay") && !hardwareSensors.includes("mosfet")) {
+        setHardwareSensors((prev) => {
+          if (prev.includes("relay")) return prev;
+          return [...prev, "relay"];
+        });
+        setSensorNames((prev) => {
+          if (prev.relay) return prev;
+          return { ...prev, relay: "Relay Module" };
+        });
+      }
+    }
+  }, [hardwareSensors]);
+
   // ── Auto-trigger hardware wiring when entering wiring step ──
   useEffect(() => {
     if (stage !== "wiring") return;
@@ -400,6 +416,28 @@ export default function SandboxBuilder({
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       const components = data.components as ComponentRecommendation;
+      // Frontend safety net: sanitize stack to prevent placeholder regressions
+      if (components.suggested_stack) {
+        const BLANK_PLACEHOLDER = /^(—|n\/?a|none|null|undefined|to be determined|tbd|-)$/i;
+        const HW_ONLY = /standalone|microcontroller|arduino|no web |no ui|embedded|raspberry\s*pi|esp32|esp8266|pico|hardware\b/i;
+        const context = (project.rawIdea + " " + JSON.stringify(analysisDraft || "")).toLowerCase();
+        const isHwOnly = HW_ONLY.test(context) ||
+          (BLANK_PLACEHOLDER.test(components.suggested_stack.frontend) &&
+           BLANK_PLACEHOLDER.test(components.suggested_stack.backend) &&
+           BLANK_PLACEHOLDER.test(components.suggested_stack.database));
+        if (isHwOnly) {
+          components.suggested_stack.frontend = "Not applicable — standalone microcontroller project";
+          components.suggested_stack.backend = "Not applicable — standalone microcontroller project";
+          components.suggested_stack.database = "Not applicable — standalone microcontroller project";
+        } else {
+          const FALLBACKS = { frontend: "Next.js (React)", backend: "Next.js API Routes (Node.js)", database: "SQLite" };
+          for (const key of ["frontend", "backend", "database"] as const) {
+            if (!components.suggested_stack[key] || BLANK_PLACEHOLDER.test(components.suggested_stack[key])) {
+              components.suggested_stack[key] = FALLBACKS[key];
+            }
+          }
+        }
+      }
       setComponentsDraft(components);
       const updated = await updateProject(project.id, { components, stage: "components" });
       setProject(updated);
@@ -943,16 +981,67 @@ export default function SandboxBuilder({
       service:  "Services / Logic",
     };
 
-    const NODE_H = 36;
-    const NODE_GAP_Y = 50;
+    // Sizing variables computed dynamically based on node count
+    const nodesList = wiringDraft?.nodes || [];
+    const totalNodes = nodesList.length;
+
+    let NODE_H = 36;
+    let NODE_GAP_Y = 110;
+    let NODE_W = 165;
+    let DB_W = 145;
+    let nodeFontSizeClass = "text-[11px]";
+    let edgeFontSizeClass = "text-[7.5px]";
+    let yLabelOffset = 6;
+    let verticalLabelOffset = 12;
+
+    if (totalNodes <= 6 && totalNodes > 0) {
+      NODE_H = 46;
+      NODE_GAP_Y = 140;
+      NODE_W = 185;
+      DB_W = 160;
+      nodeFontSizeClass = "text-[13px]";
+      edgeFontSizeClass = "text-[9.5px]";
+      yLabelOffset = 8;
+      verticalLabelOffset = 15;
+    } else if (totalNodes <= 10 && totalNodes > 0) {
+      NODE_H = 40;
+      NODE_GAP_Y = 115;
+      NODE_W = 170;
+      DB_W = 150;
+      nodeFontSizeClass = "text-[11.5px]";
+      edgeFontSizeClass = "text-[8.5px]";
+      yLabelOffset = 7;
+      verticalLabelOffset = 13;
+    } else if (totalNodes > 10) {
+      NODE_H = 32;
+      NODE_GAP_Y = 75;
+      NODE_W = 150;
+      DB_W = 135;
+      nodeFontSizeClass = "text-[9.5px]";
+      edgeFontSizeClass = "text-[7px]";
+      yLabelOffset = 5;
+      verticalLabelOffset = 10;
+    }
+
+    // Helper to dynamically adjust font size based on label length
+    const getFontSize = (label: string, maxW: number) => {
+      const len = label.length;
+      let baseSize = 11;
+      if (nodeFontSizeClass.includes("13")) baseSize = 13;
+      else if (nodeFontSizeClass.includes("11.5")) baseSize = 11.5;
+      else if (nodeFontSizeClass.includes("9.5")) baseSize = 9.5;
+
+      if (len * 6 > maxW) return "text-[8.5px]";
+      if (len * 7.2 > maxW) {
+        if (baseSize === 13) return "text-[11px]";
+        if (baseSize === 11.5) return "text-[9.5px]";
+        return "text-[8.5px]";
+      }
+      return nodeFontSizeClass;
+    };
 
     // Compute column-based positions with auto-sized nodes
     function getDiagramLayout(nodes: WiringNode[], edges: WiringEdge[]) {
-      const maxChars = Math.max(1, ...nodes.map((n) => n.label.length));
-      const nodeW = Math.max(140, Math.min(maxChars * 7.5 + 24, 260));
-      const colGap = Math.max(60, nodeW * 0.6);
-      const pad = 60;
-
       // Group non-database by type; collect database separately
       const dbs: WiringNode[] = [];
       const groups: Record<string, WiringNode[]> = { external: [], page: [], service: [] };
@@ -961,48 +1050,81 @@ export default function SandboxBuilder({
         else if (groups[n.type]) groups[n.type].push(n);
       }
 
-      // Compute column X positions (only for populated columns)
-      let cursor = pad;
-      const colX: Record<string, number> = {};
-      let contentRight = pad;
-      const colMeta: { type: string; x: number; w: number; label: string }[] = [];
-      for (const type of COLUMN_ORDER) {
-        const g = groups[type];
-        if (g.length === 0) continue;
-        colX[type] = cursor;
-        colMeta.push({ type, x: cursor, w: nodeW + colGap, label: COLUMN_LABELS[type] });
-        cursor += nodeW + colGap;
-        contentRight = cursor;
+      // Check which columns are active
+      const activeCols = COLUMN_ORDER.filter((type) => groups[type].length > 0);
+
+      // Compute column layout based on active columns
+      let colMeta: { type: string; x: number; w: number; label: string; cx: number }[] = [];
+      if (activeCols.length === 3) {
+        colMeta = [
+          { type: "external", x: 80, w: 260, label: COLUMN_LABELS.external, cx: 210 },
+          { type: "page", x: 390, w: 260, label: COLUMN_LABELS.page, cx: 520 },
+          { type: "service", x: 700, w: 260, label: COLUMN_LABELS.service, cx: 830 }
+        ];
+      } else if (activeCols.length > 0) {
+        // Collapsed layout for fewer columns
+        const pad = 100;
+        const colGap = 60;
+        const totalGaps = (activeCols.length - 1) * colGap;
+        const availableW = 950 - totalGaps;
+
+        // Weights proportional to node count
+        const weights = activeCols.map((type) => Math.max(1, groups[type].length));
+        const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
+        let currentStartX = pad;
+        colMeta = activeCols.map((type, idx) => {
+          const w = (weights[idx] / totalWeight) * availableW;
+          const x = currentStartX;
+          const cx = x + w / 2;
+          currentStartX += w + colGap;
+          return { type, x, w, label: COLUMN_LABELS[type], cx };
+        });
       }
 
-      // Position non-database nodes
-      const topY = 70;
+      const colX: Record<string, number> = {};
+      colMeta.forEach((col) => {
+        colX[col.type] = col.cx;
+      });
+
+      const pad = 60;
+      const padY = 80;
+
+      // Compute total height of non-database section to center columns
+      const maxCount = Math.max(1, ...activeCols.map((type) => groups[type].length));
+      const totalHeight = maxCount * NODE_H + (maxCount - 1) * NODE_GAP_Y;
+
       const positions: Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> = {};
-      let mainBottom = topY;
+
+      // Position non-database nodes centered vertically
       for (const type of COLUMN_ORDER) {
         const g = groups[type];
-        if (g.length === 0) continue;
-        const cx = colX[type] + nodeW / 2;
+        const N = g.length;
+        if (N === 0) continue;
+
+        const colStart = padY + (totalHeight - (N * NODE_H + (N - 1) * NODE_GAP_Y)) / 2;
+        const cx = colX[type];
+        const lane = type === "external" ? 1 : type === "page" ? 2 : 3;
+
         g.forEach((node, i) => {
-          const y = topY + i * (NODE_H + NODE_GAP_Y);
-          mainBottom = Math.max(mainBottom, y + NODE_H);
+          const y = colStart + i * (NODE_H + NODE_GAP_Y) + NODE_H / 2;
           positions[node.id] = {
-            x: cx, y: y + NODE_H / 2, w: nodeW, h: NODE_H, lane: 1,
-            color: COLORS[node.type] || COLORS.service,
+            x: cx, y, w: NODE_W, h: NODE_H, lane,
+            color: COLORS[node.type] || COLORS.service
           };
         });
       }
 
-      // Database row below
-      let dbTopY = mainBottom + 100;
+      // Position database nodes centered under the service column
+      const dbCenterX = colX.service !== undefined ? colX.service : 575;
+      const dbTopY = padY + totalHeight + 120;
+      const dbY = dbTopY + NODE_H / 2;
       if (dbs.length > 0) {
-        const dbStartX = pad + nodeW / 2;
         dbs.forEach((node, i) => {
-          const cx = dbStartX + i * (nodeW + 30);
-          mainBottom = Math.max(mainBottom, dbTopY + NODE_H);
+          const cx = dbCenterX + (i - (dbs.length - 1) / 2) * 174;
           positions[node.id] = {
-            x: cx, y: dbTopY + NODE_H / 2, w: nodeW, h: NODE_H, lane: 3,
-            color: COLORS[node.type] || COLORS.database,
+            x: cx, y: dbY, w: DB_W, h: NODE_H, lane: 4,
+            color: COLORS[node.type] || COLORS.database
           };
         });
       }
@@ -1011,57 +1133,259 @@ export default function SandboxBuilder({
       let orphanCount = 0;
       for (const edge of edges) {
         if (!positions[edge.from]) {
-          const ox = contentRight + orphanCount * (nodeW + 20) + nodeW / 2;
-          positions[edge.from] = { x: ox, y: topY + NODE_H / 2, w: nodeW, h: NODE_H, lane: 1, color: COLORS.service };
-          contentRight = ox + nodeW / 2 + 20;
+          const ox = 990;
+          const oy = padY + orphanCount * 80 + NODE_H / 2;
+          positions[edge.from] = { x: ox, y: oy, w: NODE_W, h: NODE_H, lane: 3, color: COLORS.service };
           orphanCount++;
         }
         if (!positions[edge.to]) {
-          const ox = contentRight + orphanCount * (nodeW + 20) + nodeW / 2;
-          positions[edge.to] = { x: ox, y: topY + NODE_H / 2 + (orphanCount > 0 ? NODE_H + 20 : 0), w: nodeW, h: NODE_H, lane: 1, color: COLORS.service };
-          contentRight = ox + nodeW / 2 + 20;
+          const ox = 990;
+          const oy = padY + orphanCount * 80 + NODE_H / 2;
+          positions[edge.to] = { x: ox, y: oy, w: NODE_W, h: NODE_H, lane: 3, color: COLORS.service };
           orphanCount++;
         }
       }
 
-      const viewW = Math.max(800, contentRight + pad);
-      const viewH = Math.max(400, mainBottom + 80);
-
-      return { positions, viewW, viewH, nodeW, colMeta, groups, dbs, orphanCount, pad };
-    }
-
-    // Edge path with orthogonal right-angle routing + channel offset
-    function getEdgePath(
-      from: { x: number; y: number; w: number; h: number; lane: number },
-      to: typeof from,
-      channel: number
-    ): string {
-      const x1 = from.x, y1 = from.y;
-      const x2 = to.x, y2 = to.y;
-      const ch = channel * 10;
-      const hw = from.w / 2;
-
-      // Same column — gentle arc to avoid labels
-      if (from.lane === to.lane) {
-        const midY = Math.min(y1, y2) - 30 - Math.abs(ch);
-        return `M ${x1} ${y1 - from.h / 2} Q ${(x1 + x2) / 2} ${midY}, ${x2} ${y2 + to.h / 2}`;
+      // Compute attachments for anchor spreading
+      interface Attachment {
+        edgeIndex: number;
+        nodeId: string;
+        side: "left" | "right" | "top" | "bottom";
+        otherNodeId: string;
+        otherX: number;
+        otherY: number;
       }
 
-      // Cross-column: orthogonal right-angle routing
-      const xStart = x1 + hw + Math.abs(ch);
-      const xEnd = x2 - to.w / 2 - Math.abs(ch);
-      const yMid = (y1 + y2) / 2;
+      const attachments: Record<string, Attachment[]> = {};
+      nodes.forEach((n) => {
+        attachments[n.id] = [];
+      });
 
-      return `M ${x1 + hw} ${y1} L ${xStart} ${y1} L ${xStart} ${yMid} L ${xEnd} ${yMid} L ${xEnd} ${y2} L ${x2 - to.w / 2} ${y2}`;
+      edges.forEach((edge, idx) => {
+        const fromPos = positions[edge.from];
+        const toPos = positions[edge.to];
+        if (!fromPos || !toPos) return;
+
+        let fromSide: Attachment["side"] = "right";
+        let toSide: Attachment["side"] = "left";
+
+        if (fromPos.lane === toPos.lane) {
+          if (fromPos.y < toPos.y) {
+            fromSide = "bottom";
+            toSide = "top";
+          } else {
+            fromSide = "top";
+            toSide = "bottom";
+          }
+        } else if (fromPos.lane === 4 || toPos.lane === 4) {
+          if (fromPos.lane === 4) {
+            fromSide = "top";
+            toSide = "bottom";
+          } else {
+            fromSide = "bottom";
+            toSide = "top";
+          }
+        } else {
+          if (fromPos.x < toPos.x) {
+            fromSide = "right";
+            toSide = "left";
+          } else {
+            fromSide = "left";
+            toSide = "right";
+          }
+        }
+
+        attachments[edge.from]?.push({
+          edgeIndex: idx,
+          nodeId: edge.from,
+          side: fromSide,
+          otherNodeId: edge.to,
+          otherX: toPos.x,
+          otherY: toPos.y
+        });
+
+        attachments[edge.to]?.push({
+          edgeIndex: idx,
+          nodeId: edge.to,
+          side: toSide,
+          otherNodeId: edge.from,
+          otherX: fromPos.x,
+          otherY: fromPos.y
+        });
+      });
+
+      // Sort attachments to avoid line crossings
+      Object.keys(attachments).forEach((nodeId) => {
+        const list = attachments[nodeId] || [];
+        const bySide: Record<Attachment["side"], Attachment[]> = {
+          left: [], right: [], top: [], bottom: []
+        };
+        list.forEach((att) => bySide[att.side].push(att));
+
+        bySide.left.sort((a, b) => a.otherY - b.otherY || a.otherX - b.otherX);
+        bySide.right.sort((a, b) => a.otherY - b.otherY || a.otherX - b.otherX);
+        bySide.top.sort((a, b) => a.otherX - b.otherX || a.otherY - b.otherY);
+        bySide.bottom.sort((a, b) => a.otherX - b.otherX || a.otherY - b.otherY);
+
+        attachments[nodeId] = [
+          ...bySide.left,
+          ...bySide.right,
+          ...bySide.top,
+          ...bySide.bottom
+        ];
+      });
+
+      // Compute viewW dynamically based on actual columns
+      const lastCol = colMeta.length > 0 ? colMeta[colMeta.length - 1] : null;
+      const viewW = lastCol ? lastCol.x + lastCol.w + 80 : 400;
+      const viewH = dbTopY + NODE_H + 80;
+
+      return { positions, viewW, viewH, nodeW: NODE_W, colMeta, groups, dbs, orphanCount, pad, attachments, padY, totalHeight, dbTopY };
     }
 
     // Reusable SVG diagram renderer
     const renderDiagramSvg = (wide: number, high: number, mini: boolean) => {
       const nodes = wiringDraft?.nodes || [];
       const edges = wiringDraft?.edges || [];
-      const { positions, nodeW, colMeta, groups, dbs, orphanCount, pad } = getDiagramLayout(nodes, edges);
-      const maxGroupLen = Math.max(1, ...Object.values(groups).flatMap((g) => g.length));
+      const { positions, nodeW, colMeta, groups, dbs, orphanCount, pad, attachments, padY, totalHeight, dbTopY } = getDiagramLayout(nodes, edges);
+      // Column height = tallest active column only, not including empty columns
+      const activeGroupLens = colMeta.map((col) => groups[col.type]?.length || 0);
+      const maxGroupLen = activeGroupLens.length > 0 ? Math.max(...activeGroupLens) : 1;
       const colH = maxGroupLen * (NODE_H + NODE_GAP_Y) + 80;
+
+      // Helper function to get anchor points
+      const getAnchor = (
+        nodeId: string,
+        edgeIndex: number,
+        side: "left" | "right" | "top" | "bottom"
+      ) => {
+        const pos = positions[nodeId];
+        if (!pos) return { x: 0, y: 0 };
+        const list = attachments[nodeId] || [];
+        const sideAttachments = list.filter((att) => att.side === side);
+        const index = sideAttachments.findIndex((att) => att.edgeIndex === edgeIndex);
+        const count = sideAttachments.length;
+
+        const idx = index >= 0 ? index : 0;
+        const cnt = count > 0 ? count : 1;
+
+        if (side === "left") {
+          return {
+            x: pos.x - pos.w / 2,
+            y: pos.y - pos.h / 2 + (idx + 1) * pos.h / (cnt + 1)
+          };
+        } else if (side === "right") {
+          return {
+            x: pos.x + pos.w / 2,
+            y: pos.y - pos.h / 2 + (idx + 1) * pos.h / (cnt + 1)
+          };
+        } else if (side === "top") {
+          return {
+            x: pos.x - pos.w / 2 + (idx + 1) * pos.w / (cnt + 1),
+            y: pos.y - pos.h / 2
+          };
+        } else { // bottom
+          return {
+            x: pos.x - pos.w / 2 + (idx + 1) * pos.w / (cnt + 1),
+            y: pos.y + pos.h / 2
+          };
+        }
+      };
+
+      // Edge path and label positioning with orthogonal routing
+      const getEdgePath = (
+        fromId: string,
+        toId: string,
+        edgeIndex: number
+      ) => {
+        const from = positions[fromId];
+        const to = positions[toId];
+        if (!from || !to) return { d: "", labelX: 0, labelY: 0 };
+
+        let fromSide: "left" | "right" | "top" | "bottom" = "right";
+        let toSide: "left" | "right" | "top" | "bottom" = "left";
+
+        if (from.lane === to.lane) {
+          if (from.y < to.y) {
+            fromSide = "bottom";
+            toSide = "top";
+          } else {
+            fromSide = "top";
+            toSide = "bottom";
+          }
+        } else if (from.lane === 4 || to.lane === 4) {
+          if (from.lane === 4) {
+            fromSide = "top";
+            toSide = "bottom";
+          } else {
+            fromSide = "bottom";
+            toSide = "top";
+          }
+        } else {
+          if (from.x < to.x) {
+            fromSide = "right";
+            toSide = "left";
+          } else {
+            fromSide = "left";
+            toSide = "right";
+          }
+        }
+
+        const p1 = getAnchor(fromId, edgeIndex, fromSide);
+        const p2 = getAnchor(toId, edgeIndex, toSide);
+        const channel = edgeIndex;
+
+        // Routing
+        if (from.lane === to.lane) {
+          const offset = 40 + channel * 12;
+          const xMid = from.x - from.w / 2 - offset;
+          const d = `M ${p1.x} ${p1.y} L ${xMid} ${p1.y} L ${xMid} ${p2.y} L ${p2.x} ${p2.y}`;
+          return {
+            d,
+            labelX: xMid - 10,
+            labelY: (p1.y + p2.y) / 2
+          };
+        }
+
+        if (from.lane === 1 && to.lane === 3) {
+          const routeY = 35 - channel * 10;
+          const d = `M ${p1.x} ${p1.y} L ${from.x + from.w / 2 + 20} ${p1.y} L ${from.x + from.w / 2 + 20} ${routeY} L ${to.x - to.w / 2 - 20} ${routeY} L ${to.x - to.w / 2 - 20} ${p2.y} L ${p2.x} ${p2.y}`;
+          return {
+            d,
+            labelX: (from.x + to.x) / 2,
+            labelY: routeY - yLabelOffset
+          };
+        }
+
+        if (to.lane === 4) {
+          const baseGapY = (padY + totalHeight + dbTopY) / 2;
+          const my_staggered = baseGapY + (channel - 3) * 12;
+          if (Math.abs(p1.x - p2.x) < 5) {
+            const d = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+            return {
+              d,
+              labelX: p1.x + 12,
+              labelY: (p1.y + p2.y) / 2
+            };
+          } else {
+            const d = `M ${p1.x} ${p1.y} L ${p1.x} ${my_staggered} L ${p2.x} ${my_staggered} L ${p2.x} ${p2.y}`;
+            return {
+              d,
+              labelX: (p1.x + p2.x) / 2,
+              labelY: my_staggered - yLabelOffset
+            };
+          }
+        }
+
+        const mx = (from.x + to.x) / 2;
+        const mx_staggered = mx + (channel - 3) * 12;
+        const d = `M ${p1.x} ${p1.y} L ${mx_staggered} ${p1.y} L ${mx_staggered} ${p2.y} L ${p2.x} ${p2.y}`;
+        return {
+          d,
+          labelX: (p1.x + mx_staggered) / 2,
+          labelY: p1.y - yLabelOffset
+        };
+      };
 
       return (
         <svg viewBox={`0 0 ${wide} ${high}`} className="w-full h-auto" style={{ minWidth: mini ? 'auto' : '700px', maxHeight: mini ? `${high}px` : '540px' }}>
@@ -1077,35 +1401,37 @@ export default function SandboxBuilder({
           {/* Column backgrounds */}
           {colMeta.map((col, i) => (
             <g key={`col-${col.type}`}>
-              <rect x={col.x - 20} y={8} width={col.w} height={colH} fill={i % 2 === 0 ? COLORS.colEven : COLORS.colOdd} rx="8" />
-              {i > 0 && <line x1={col.x - 20} y1={8} x2={col.x - 20} y2={8 + colH} stroke="#e2e8f0" strokeWidth="1" />}
-              <text x={col.x + nodeW / 2} y={28} textAnchor="middle" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">{col.label}</text>
+              <rect x={col.x} y={8} width={col.w} height={colH} fill={i % 2 === 0 ? COLORS.colEven : COLORS.colOdd} rx="8" />
+              <text x={col.x + col.w / 2} y={28} textAnchor="middle" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">{col.label}</text>
             </g>
           ))}
 
           {/* Database area background */}
-          {dbs.length > 0 && (
-            <g>
-              <rect x={pad - 20} y={Math.max(...dbs.map((n) => positions[n.id]?.y ?? 0)) - NODE_H / 2 - 12} width={dbs.length * (nodeW + 30) + 40} height={NODE_H + 24} fill={COLORS.colOdd} rx="8" />
-              <text x={pad - 8} y={Math.max(...dbs.map((n) => positions[n.id]?.y ?? 0)) - NODE_H / 2 - 12 + 16} textAnchor="start" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">Data / Storage</text>
-            </g>
-          )}
+          {dbs.length > 0 && (() => {
+            const dbY = Math.max(...dbs.map((n) => positions[n.id]?.y ?? 0));
+            const dbW = DB_W;
+            const activeService = positions[nodes.find(n => n.type === "service")?.id || ""];
+            const dbCenterX = activeService ? activeService.x : 575;
+            const rectX = dbCenterX - ((dbs.length - 1) / 2) * 174 - dbW / 2 - 20;
+            const rectW = (dbs.length - 1) * 174 + dbW + 40;
+            return (
+              <g>
+                <rect x={rectX} y={dbY - NODE_H / 2 - 12} width={rectW} height={NODE_H + 24} fill={COLORS.colOdd} rx="8" />
+                <text x={rectX + 12} y={dbY - NODE_H / 2 - 12 + 16} textAnchor="start" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">Data / Storage</text>
+              </g>
+            );
+          })()}
 
           {/* Edges with channel offset for overlap avoidance */}
           {edges.map((edge, i) => {
             const from = positions[edge.from];
             const to = positions[edge.to];
             if (!from || !to) return null;
-            const d = getEdgePath(from, to, i);
-            // Label midpoint: horizontal segment center for cross-column, arc apex for same-column
-            const labelX = from.lane === to.lane ? (from.x + to.x) / 2 : (from.x + to.x) / 2;
-            const labelY = from.lane === to.lane
-              ? Math.min(from.y, to.y) - 46 - i * 10
-              : ((from.y + to.y) / 2) - 6 + (i % 2 === 0 ? -8 : 8) * Math.ceil((i + 1) / 2);
+            const { d, labelX, labelY } = getEdgePath(edge.from, edge.to, i);
             return (
               <g key={`edge-${i}`}>
                 <path d={d} fill="none" stroke={COLORS.arrow} strokeWidth="1.5" markerEnd="url(#arrow)" />
-                <text x={labelX} y={labelY} textAnchor="middle" className="text-[7.5px] font-medium" fill="#64748b">{edge.label}</text>
+                <text x={labelX} y={labelY} textAnchor="middle" className={`${edgeFontSizeClass} font-medium`} fill="#64748b">{edge.label}</text>
               </g>
             );
           })}
@@ -1113,12 +1439,13 @@ export default function SandboxBuilder({
           {/* Nodes */}
           {Object.entries(positions).map(([id, pos]) => {
             const label = nodes.find((n) => n.id === id)?.label || id;
-            const isDb = pos.lane === 3;
+            const isDb = pos.lane === 4;
+            const fontSizeClass = getFontSize(label, pos.w - 12);
             return (
               <g key={`node-${id}`}>
-                <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={pos.h} rx={isDb ? 9 : 9} fill={pos.color} filter="url(#shadow)" />
+                <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={pos.h} rx={9} fill={pos.color} filter="url(#shadow)" />
                 {!isDb && <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={3.5} rx={1.5} fill="white" fillOpacity="0.18" />}
-                <text x={pos.x} y={pos.y + 4.5} textAnchor="middle" className="text-[11px] font-bold" fill="white">{label}</text>
+                <text x={pos.x} y={pos.y + 4} textAnchor="middle" className={`${fontSizeClass} font-bold`} fill="white">{label}</text>
               </g>
             );
           })}
@@ -1270,7 +1597,7 @@ export default function SandboxBuilder({
                     {wiringDraft.nodes.map((node, i) => (
                       <div key={node.id} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-3 py-2 flex items-center gap-2">
                         <span className={`w-2 h-2 rounded-full shrink-0 ${
-                          node.type === "page" ? "bg-[#ec4899]" : node.type === "service" ? "bg-[#3b82f6]" : node.type === "database" ? "bg-[#8b5cf6]" : node.type === "external" ? "bg-[#d97706]" : "bg-[#f59e0b]"
+                          node.type === "page" ? "bg-[#ec4899]" : node.type === "service" ? "bg-[#a855f7]" : node.type === "database" ? "bg-[#8b5cf6]" : node.type === "external" ? "bg-[#3b82f6]" : "bg-[#f59e0b]"
                         }`} />
                         <input
                           value={node.label}

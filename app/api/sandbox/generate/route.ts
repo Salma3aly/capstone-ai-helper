@@ -4,6 +4,7 @@ import { grokChatJSON } from "@/lib/sandbox/grok";
 import { COMPONENTS, BOARD_COMPONENTS } from "@/lib/sandbox/components";
 import { validateBuild } from "@/lib/sandbox/validate";
 import { findMissingControlLogic } from "@/lib/sandbox/actuators";
+import { enforceDriverWiring, correctPinsInCode, validatePins, checkPinMismatch, checkDriverPresence } from "@/lib/sandbox/pins";
 import type { GenerateResponse, ValidationIssue } from "@/lib/sandbox/types";
 
 function detectLanguage(board: string): string {
@@ -42,6 +43,38 @@ export async function POST(req: Request) {
     const data = await grokChatJSON<GenerateResponse>([
       { role: "user", content: prompt },
     ]);
+
+    // Enforce driver module and correct pin numbers in generated code
+    if (data.wiring) {
+      data.wiring = enforceDriverWiring(data.wiring);
+      // Driver presence self-check — hard block if any actuator lacks a driver
+      const driverErrors = checkDriverPresence(data.wiring);
+      if (driverErrors.length > 0) {
+        return NextResponse.json({
+          error: driverErrors.join(" "),
+          blocked: true,
+        }, { status: 422 });
+      }
+      if (data.code) {
+        data.code = correctPinsInCode(data.wiring, data.code);
+        // Hard validation: pin mismatch blocks generation
+        const pinErrors = checkPinMismatch(data.wiring, data.code);
+        if (pinErrors.length > 0) {
+          return NextResponse.json({
+            error: `Pin mismatch detected after auto-correction: ${pinErrors.join("; ")}. Please regenerate.`,
+            blocked: true,
+          }, { status: 422 });
+        }
+        // Soft warnings for remaining mismatches
+        const pinWarnings = validatePins(data.wiring, data.code);
+        pinWarnings.forEach(msg => {
+          issues.push({
+            severity: "warning",
+            message: msg
+          });
+        });
+      }
+    }
 
     // Self-check: verify generated code has control logic for every actuator in wiring
     const missingControl = data.wiring && data.code

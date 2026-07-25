@@ -82,6 +82,13 @@ Return format:
       console.warn("AI hallucinated sensorIds", { hallucinated });
     }
 
+    // Automatically inject relay driver if water pump or solenoid valve is selected
+    if (validSensorIds.includes("water-pump") || validSensorIds.includes("solenoid-lock")) {
+      if (!validSensorIds.includes("relay") && !validSensorIds.includes("mosfet")) {
+        validSensorIds.push("relay");
+      }
+    }
+
     return NextResponse.json({
       boardId: data.boardId,
       sensorIds: validSensorIds,

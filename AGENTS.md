@@ -108,6 +108,9 @@ Build out core app features and prepare the community hub for production deploym
 - Build command: `npx next build`.
 - `cleanString`/`cleanAuthors` helpers strip N/A/none/unknown/null/undefined.
 - Pipeline centers in architecture SVG: [210, 520, 830]; databases aligned with 174px gaps.
+- Actuators in Hardware Wiring (e.g. water pumps, solenoid valves) must always route through a driver stage (relay module or MOSFET) between the microcontroller pin and the actuator. This driver module must be present in selection, connections, and breadboard diagram.
+- Pin numbers in generated code (e.g. digital/analog pins) must exactly match the pin assignments defined in Wiring's connections data. Code must never independently assign/hardcode pin numbers.
+- Suggested stack fields (`frontend`, `backend`, `database`) in the Components step must always resolve to a single concrete technology name, or be set to "Not applicable — standalone microcontroller project" if the project is hardware-only (never leave as blank, placeholder, or "To be determined").
 - OJS OAI-PMH URL: `{protocol}//{host}/{basePath}/index.php/{journalName}/oai?verb=GetRecord&metadataPrefix=oai_dc&identifier=oai:ojs.aaai.org:article/{id}`.
 - Crossref DOI prefix validation checks `crossrefData.doi` (after stripping `https://doi.org/`) against `PUBLISHER_DOI_PREFIXES` — rejects wrong-article matches from title search.
 - Step 5b fires only when `(authors.length === 0 || !pubDate || !title || !siteName)` AND no HTML available — fills gaps only, never overrides existing data.

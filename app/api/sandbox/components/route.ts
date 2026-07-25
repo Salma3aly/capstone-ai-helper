@@ -6,8 +6,17 @@ import type { ComponentRecommendation } from "@/lib/sandbox/types";
 const BLANK_RE = /^(—|n\/?a|none|null|undefined)$/i;
 const HW_ONLY_RE = /standalone|microcontroller|arduino|no web |no ui|embedded|raspberry\s*pi|esp32|esp8266|pico|hardware\b/i;
 
-function isBlank(v: string): boolean {
-  return !v || v.trim() === "" || BLANK_RE.test(v.trim());
+function isBlankOrPlaceholder(v: string): boolean {
+  if (!v) return true;
+  const val = v.trim().toLowerCase();
+  return (
+    val === "" ||
+    val === "to be determined" ||
+    val === "tbd" ||
+    val === "—" ||
+    val === "-" ||
+    BLANK_RE.test(val)
+  );
 }
 
 function validateStack(
@@ -15,23 +24,42 @@ function validateStack(
   idea: string,
   analysisStr: string
 ): void {
-  const context = idea + " " + analysisStr;
-  const isHwOnly = HW_ONLY_RE.test(context);
+  const context = (idea + " " + analysisStr).toLowerCase();
 
-  if (isHwOnly && isBlank(stack.frontend) && isBlank(stack.backend) && isBlank(stack.database)) {
-    stack.frontend = "Not applicable — standalone microcontroller project";
-    stack.backend = "";
-    stack.database = "";
-    return;
-  }
-
+  // Clean up any slash-separated lists first
   const fields = ["frontend", "backend", "database"] as const;
   for (const key of fields) {
     let val = stack[key]?.trim() || "";
-    if (isBlank(val) || val === "—") {
-      stack[key] = "To be determined";
-    } else if (val.includes("/")) {
+    if (val.includes("/")) {
       stack[key] = val.split("/")[0].trim();
+    }
+  }
+
+  // Check if it is a hardware-only project
+  const isHwOnly =
+    HW_ONLY_RE.test(context) ||
+    (isBlankOrPlaceholder(stack.frontend) &&
+      isBlankOrPlaceholder(stack.backend) &&
+      isBlankOrPlaceholder(stack.database));
+
+  if (isHwOnly) {
+    stack.frontend = "Not applicable — standalone microcontroller project";
+    stack.backend = "Not applicable — standalone microcontroller project";
+    stack.database = "Not applicable — standalone microcontroller project";
+    return;
+  }
+
+  // If not hardware-only, replace any remaining blank/placeholder fields with concrete fallbacks
+  const fallbacks = {
+    frontend: "Next.js (React)",
+    backend: "Next.js API Routes (Node.js)",
+    database: "SQLite",
+  };
+
+  for (const key of fields) {
+    let val = stack[key]?.trim() || "";
+    if (isBlankOrPlaceholder(val)) {
+      stack[key] = fallbacks[key];
     }
   }
 }
