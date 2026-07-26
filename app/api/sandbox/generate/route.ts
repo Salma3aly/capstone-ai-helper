@@ -3,8 +3,8 @@ import { buildGeneratePrompt } from "@/lib/sandbox/prompts";
 import { grokChatJSON } from "@/lib/sandbox/grok";
 import { COMPONENTS, BOARD_COMPONENTS } from "@/lib/sandbox/components";
 import { validateBuild } from "@/lib/sandbox/validate";
-import { findMissingControlLogic } from "@/lib/sandbox/actuators";
-import { enforceDriverWiring, correctPinsInCode, validatePins, checkPinMismatch, checkDriverPresence } from "@/lib/sandbox/pins";
+import { findMissingControlLogic, findCoreFeaturesMissingActuators, findActuatorNodesMissingFromHardware } from "@/lib/sandbox/actuators";
+import { enforceDriverWiring, correctPinsInCode, validatePins, checkPinMismatch, checkDriverPresence, fixPowerWiring, removeUnusedConstants, checkPlaceholderPins } from "@/lib/sandbox/pins";
 import type { GenerateResponse, ValidationIssue } from "@/lib/sandbox/types";
 
 function detectLanguage(board: string): string {
@@ -16,12 +16,40 @@ function detectLanguage(board: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { idea, boardId, sensorIds, sensorDisplayNames }: { idea: string; boardId: string; sensorIds: string[]; sensorDisplayNames?: string[] } =
-      await req.json();
+    const { idea, boardId, sensorIds, sensorDisplayNames, analysis, architectureNodes }: {
+      idea: string; boardId: string; sensorIds: string[]; sensorDisplayNames?: string[];
+      analysis?: { core_features?: string[] } | null;
+      architectureNodes?: { id: string; label: string }[];
+    } = await req.json();
 
     if (!idea || !boardId || !sensorIds || sensorIds.length === 0) {
       return NextResponse.json({ error: "Idea, board, and at least one sensor are required" }, { status: 400 });
     }
+
+    // Run electrical validation
+    const issues: ValidationIssue[] = validateBuild(boardId, sensorIds);
+
+    // Validate hardware selection against analysis and architecture nodes
+    if (analysis?.core_features?.length) {
+      const missingFromFeatures = findCoreFeaturesMissingActuators(analysis.core_features, sensorIds);
+      for (const m of missingFromFeatures) {
+        issues.push({
+          severity: "warning",
+          message: `Your project's core feature "${m.feature}" implies a ${m.suggestedComponentId.replace(/-/g, " ")}, but it's not in your hardware selection. Only sensors will be used — no actuator control will be generated.`,
+        });
+      }
+    }
+    if (architectureNodes?.length) {
+      const missingFromNodes = findActuatorNodesMissingFromHardware(architectureNodes, sensorIds);
+      for (const m of missingFromNodes) {
+        issues.push({
+          severity: "warning",
+          message: `Your architecture diagram includes "${m.label}" (detected as ${m.suggestedComponentId.replace(/-/g, " ")}), but it's not in your hardware selection. Add it to enable automated control, or it will be left out of the generated code.`,
+        });
+      }
+    }
+
+    const errors = issues.filter((i) => i.severity === "error");
 
     // Resolve names from IDs for the prompt
     const boardComp = BOARD_COMPONENTS.find((c) => c.id === boardId);
@@ -34,10 +62,6 @@ export async function POST(req: Request) {
       : sensorIds
           .map((id) => COMPONENTS.find((c) => c.id === id)?.name ?? id);
 
-    // Run electrical validation
-    const issues = validateBuild(boardId, sensorIds);
-    const errors = issues.filter((i) => i.severity === "error");
-
     const language = detectLanguage(boardName);
     const prompt = buildGeneratePrompt(idea, boardName, sensorNames, language);
     const data = await grokChatJSON<GenerateResponse>([
@@ -47,6 +71,8 @@ export async function POST(req: Request) {
     // Enforce driver module and correct pin numbers in generated code
     if (data.wiring) {
       data.wiring = enforceDriverWiring(data.wiring);
+      // Fix power wiring: prevent VCC/GND mapped to numbered GPIO pins
+      data.wiring = fixPowerWiring(data.wiring);
       // Driver presence self-check — hard block if any actuator lacks a driver
       const driverErrors = checkDriverPresence(data.wiring);
       if (driverErrors.length > 0) {
@@ -65,6 +91,16 @@ export async function POST(req: Request) {
             blocked: true,
           }, { status: 422 });
         }
+        // Hard validation: placeholder pin values (PIN, TODO, etc.) block generation
+        const placeholderErrors = checkPlaceholderPins(data.code);
+        if (placeholderErrors.length > 0) {
+          return NextResponse.json({
+            error: placeholderErrors.join("; "),
+            blocked: true,
+          }, { status: 422 });
+        }
+        // Remove any declared constants that are never used in setup()/loop()
+        data.code = removeUnusedConstants(data.code);
         // Soft warnings for remaining mismatches
         const pinWarnings = validatePins(data.wiring, data.code);
         pinWarnings.forEach(msg => {

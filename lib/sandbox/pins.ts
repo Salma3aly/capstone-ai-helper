@@ -327,15 +327,29 @@ export function enforceDriverWiring(wiring: WiringItem[]): WiringItem[] {
     wiring.forEach((item) => {
       const name = item.component.toLowerCase();
       if (ACTUATOR_REQUIRING_DRIVER.test(name) && !/relay|mosfet/.test(name)) {
-        const mcPin = item.connections.map(extractPinFromConnection).find(Boolean);
+        // Extract pin from the actuator's old connections (looking past VCC/GND)
+        const mcPin = item.connections
+          .filter((c) => {
+            const lhs = c.split(/→|->/)[0]?.trim().toLowerCase();
+            return !/^vcc$|^gnd$/.test(lhs);
+          })
+          .map(extractPinFromConnection)
+          .find(Boolean);
         if (mcPin) {
-          // Relocate the MCU pin connection to the driver module
-          driverEntry!.connections = driverEntry!.connections.map((conn) => {
-            if (conn.toLowerCase().includes("in →") || conn.toLowerCase().includes("sig →")) {
-              return `IN → Pin ${mcPin}`;
-            }
-            return conn;
-          });
+          // Ensure the driver has an IN/SIG connection (add one if missing)
+          const hadInConn = driverEntry!.connections.some(
+            (c) => /(^|→)\s*(in|sig)\s*→/i.test(c) || c.toLowerCase().includes("in →") || c.toLowerCase().includes("sig →")
+          );
+          if (hadInConn) {
+            driverEntry!.connections = driverEntry!.connections.map((conn) => {
+              if (conn.toLowerCase().includes("in →") || conn.toLowerCase().includes("sig →")) {
+                return `IN → Pin ${mcPin}`;
+              }
+              return conn;
+            });
+          } else {
+            driverEntry!.connections.push(`IN → Pin ${mcPin}`);
+          }
 
           // Rewire actuator to route through the driver module
           item.connections = [
@@ -348,6 +362,75 @@ export function enforceDriverWiring(wiring: WiringItem[]): WiringItem[] {
   }
 
   return wiring;
+}
+
+/**
+ * Fix power wiring: auto-correct any VCC/GND line mapped to a digital/analog pin.
+ * VCC must only go to 5V/3.3V power rails, never to a numbered GPIO pin.
+ */
+export function fixPowerWiring(wiring: WiringItem[]): WiringItem[] {
+  for (const item of wiring) {
+    item.connections = item.connections.map((conn) => {
+      const [lhs, rhs] = conn.split(/→|->/).map((s) => s.trim());
+      if (!lhs || !rhs) return conn;
+      const lhsLower = lhs.toLowerCase();
+      // If VCC maps to a numbered pin, fix to 5V
+      if ((lhsLower === "vcc" || lhsLower === "vin") && /\b\d+\b/.test(rhs) && !/\b(5v|3v|3\.3|vin|vcc)\b/i.test(rhs)) {
+        return `${lhs} → 5V`;
+      }
+      return conn;
+    });
+  }
+  return wiring;
+}
+
+/**
+ * Scan code for declared pin constants that are never referenced in setup() or loop().
+ * Returns code with unused constants removed.
+ */
+export function removeUnusedConstants(code: string): string {
+  // Find all #define and const int declarations
+  const declRegex = /(?:#define\s+(\w+)\s+\d+|(?:const\s+)?(?:int|byte|uint8_t)\s+(\w+)\s*=\s*\d+)/g;
+  const body = code.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const setupLoop = body.match(/(?:void\s+setup\s*\([^)]*\)\s*\{[\s\S]*?(?=\bvoid\s)|void\s+loop\s*\([^)]*\)\s*\{[\s\S]*?\})/g)?.join(" ") || body;
+
+  let result = code;
+  let m;
+  const declRegexGlobal = new RegExp(declRegex.source, "g");
+  while ((m = declRegexGlobal.exec(code)) !== null) {
+    const name = m[1] || m[2];
+    if (!name) continue;
+    // Check if this constant is referenced after its declaration (in setup/loop or functions)
+    const refRegex = new RegExp(`\\b${name}\\b`, "g");
+    let refCount = 0;
+    let refMatch;
+    while ((refMatch = refRegex.exec(setupLoop)) !== null) {
+      refCount++;
+    }
+    // Also check in the code body beyond the declaration line
+    const codeRefs = code.match(refRegex)?.length || 0;
+    if (codeRefs <= 1) {
+      // Only appears in its own declaration — remove it
+      result = result.replace(new RegExp(`(?:#define\\s+${name}\\s+\\d+|(?:const\\s+)?(?:int|byte|uint8_t)\\s+${name}\\s*=\\s*\\d+)\\s*;?\\s*`, "gm"), "");
+    }
+  }
+  return result;
+}
+
+/**
+ * Scan code for placeholder values (PIN, TODO, X, undefined, etc.) in pin constants.
+ * Returns errors for any placeholder found.
+ */
+export function checkPlaceholderPins(code: string): string[] {
+  const errors: string[] = [];
+  // Match const int FOO = PIN; #define FOO PIN; const int FOO = TODO; etc.
+  const placeholderRegex = /(?:#define\s+\w+\s+|(?:const\s+)?(?:int|byte|uint8_t)\s+\w+\s*=\s*)(PIN|TODO|X|undefined|null|PLACEHOLDER|VALUE)(?:\s*;)?/gi;
+  let m;
+  while ((m = placeholderRegex.exec(code)) !== null) {
+    const decl = m[0].trim();
+    errors.push(`Placeholder value "${m[1]}" found in declaration: "${decl}". Must be a real pin number.`);
+  }
+  return errors;
 }
 
 /**

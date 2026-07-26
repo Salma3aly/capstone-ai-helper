@@ -104,3 +104,94 @@ const ACTUATOR_KEYWORDS = [
   "stepper", "lcd", "oled", "display", "fan", "valve", "lamp",
   "light", "heater", "lock",
 ];
+
+/**
+ * Map common actuator label patterns from architecture diagram nodes
+ * to corresponding catalog component IDs.
+ */
+const NODE_LABEL_TO_COMPONENT: { pattern: RegExp; componentId: string }[] = [
+  { pattern: /\b(pump|water.?pump)\b/i, componentId: "water-pump" },
+  { pattern: /\b(solenoid|lock|valve)\b/i, componentId: "solenoid-lock" },
+  { pattern: /\b(relay)\b/i, componentId: "relay" },
+  { pattern: /\b(motor|dc.?motor|stepper)\b/i, componentId: "dc-motor" },
+  { pattern: /\b(servo)\b/i, componentId: "servo-sg90" },
+  { pattern: /\b(led|rgb.?led)\b/i, componentId: "led" },
+  { pattern: /\b(buzzer|speaker|alarm|siren)\b/i, componentId: "buzzer" },
+  { pattern: /\b(fan)\b/i, componentId: "dc-motor" },
+  { pattern: /\b(vibrator|vibration)\b/i, componentId: "vibration-motor" },
+  { pattern: /\b(heater|heating|element)\b/i, componentId: "relay" },
+];
+
+/**
+ * Map analysis core_feature keywords to catalog component IDs.
+ */
+const FEATURE_KEYWORD_TO_COMPONENT: { keyword: string; componentId: string }[] = [
+  { keyword: "water", componentId: "water-pump" },
+  { keyword: "pump", componentId: "water-pump" },
+  { keyword: "irrigate", componentId: "water-pump" },
+  { keyword: "sprinkler", componentId: "water-pump" },
+  { keyword: "motor", componentId: "dc-motor" },
+  { keyword: "rotate", componentId: "dc-motor" },
+  { keyword: "spin", componentId: "dc-motor" },
+  { keyword: "move", componentId: "servo-sg90" },
+  { keyword: "lock", componentId: "solenoid-lock" },
+  { keyword: "unlock", componentId: "solenoid-lock" },
+  { keyword: "solenoid", componentId: "solenoid-lock" },
+  { keyword: "valve", componentId: "solenoid-lock" },
+  { keyword: "alarm", componentId: "buzzer" },
+  { keyword: "buzzer", componentId: "buzzer" },
+  { keyword: "heat", componentId: "relay" },
+  { keyword: "cool", componentId: "relay" },
+  { keyword: "fan", componentId: "dc-motor" },
+  { keyword: "light", componentId: "led" },
+  { keyword: "illuminate", componentId: "led" },
+  { keyword: "blink", componentId: "led" },
+  { keyword: "display", componentId: "led" },
+  { keyword: "vibrate", componentId: "vibration-motor" },
+];
+
+/**
+ * Scan architecture diagram nodes for actuator-like labels and return
+ * those that are NOT present in the selected hardware IDs.
+ */
+export function findActuatorNodesMissingFromHardware(
+  nodes: { id: string; label: string }[],
+  selectedIds: string[]
+): { label: string; suggestedComponentId: string }[] {
+  const result: { label: string; suggestedComponentId: string }[] = [];
+  const seen = new Set<string>();
+  for (const node of nodes) {
+    const label = node.label;
+    for (const entry of NODE_LABEL_TO_COMPONENT) {
+      if (entry.pattern.test(label) && !selectedIds.includes(entry.componentId) && !seen.has(entry.componentId)) {
+        result.push({ label, suggestedComponentId: entry.componentId });
+        seen.add(entry.componentId);
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Scan analysis core_features for action keywords that imply actuators
+ * not present in the selected hardware IDs.
+ */
+export function findCoreFeaturesMissingActuators(
+  coreFeatures: string[],
+  selectedIds: string[]
+): { feature: string; suggestedComponentId: string }[] {
+  const result: { feature: string; suggestedComponentId: string }[] = [];
+  const seen = new Set<string>();
+  for (const feat of coreFeatures) {
+    const lower = feat.toLowerCase();
+    for (const entry of FEATURE_KEYWORD_TO_COMPONENT) {
+      if (lower.includes(entry.keyword) && !selectedIds.includes(entry.componentId) && !seen.has(entry.componentId)) {
+        result.push({ feature: feat, suggestedComponentId: entry.componentId });
+        seen.add(entry.componentId);
+        break;
+      }
+    }
+  }
+  return result;
+}

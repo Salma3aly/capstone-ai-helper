@@ -337,7 +337,7 @@ export function BreadboardSimulator({
             const labelX = bh(col, row).x + (pins.length * BB.pitch) / 2;
             const labelY = bh(col, row).y - 6;
             return (
-              <g key={sg.name}>
+              <g key={`${sg.name}-${idx}`}>
                 {/* Component highlight region */}
                 <rect
                   x={bh(col, row - 1).x - 4}
@@ -359,7 +359,7 @@ export function BreadboardSimulator({
                 {pins.map((p, pi) => {
                   const h = bh(p.col, p.row);
                   return (
-                    <g key={`${sg.name}-pin-${pi}`}>
+                      <g key={`${sg.name}-${idx}-pin-${pi}`}>
                       <circle cx={h.x} cy={h.y} r="2.5" fill="#3b82f6" stroke="#2563eb" strokeWidth="1" />
                       <text x={h.x} y={h.y - 6} fill="#3b82f6" fontSize="5" fontFamily="monospace" fontWeight="bold" textAnchor="middle">
                         {p.label}
@@ -372,7 +372,7 @@ export function BreadboardSimulator({
           })}
 
           {/* ═══════════════ WIRES ═══════════════ */}
-          {parsedWires.map((wire) => {
+          {parsedWires.map((wire, wi) => {
             const isHovered =
               hoveredConnection?.component === wire.component &&
               hoveredConnection?.connectionIndex === wire.connIndex;
@@ -380,7 +380,7 @@ export function BreadboardSimulator({
             const pathD = `M ${wire.from.x} ${wire.from.y} C ${midX} ${wire.from.y}, ${midX} ${wire.to.y}, ${wire.to.x} ${wire.to.y}`;
             return (
               <g
-                key={wire.id}
+                key={`${wire.id}-${wi}`}
                 onMouseEnter={() => onHoverConnection({ component: wire.component, connectionIndex: wire.connIndex })}
                 onMouseLeave={() => onHoverConnection(null)}
                 className="cursor-pointer"

@@ -16,7 +16,9 @@ import {
 } from "@/lib/sandbox/store";
 import { BreadboardSimulator } from "@/components/sandbox/BreadboardSimulator";
 import { BOARD_COMPONENTS, COMPONENTS } from "@/lib/sandbox/components";
-import { findActionFeaturesWithoutActuators, findMissingControlLogic } from "@/lib/sandbox/actuators";
+import ArchitectureDiagram from "@/components/ArchitectureDiagram";
+
+import { findActionFeaturesWithoutActuators, findMissingControlLogic, findActuatorNodesMissingFromHardware, findCoreFeaturesMissingActuators } from "@/lib/sandbox/actuators";
 import type { RamProduct } from "@/lib/sandbox/ram";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
@@ -85,12 +87,14 @@ export default function SandboxBuilder({
 
   const hwDropdownRef = useRef<HTMLDivElement>(null);
 
+  // ── Missing actuator detection ─────────────────────────────────
+  const [autoAddedActuators, setAutoAddedActuators] = useState<string[]>([]);
+
   // ── RAM components ────────────────────────────────────────────────
   const [ramProducts, setRamProducts] = useState<RamProduct[]>([]);
   const [ramLoading, setRamLoading] = useState(false);
 
-  // ── Diagram fullscreen ────────────────────────────────────────────
-  const [diagramFullscreen, setDiagramFullscreen] = useState(false);
+
 
   const DRAFT_KEY = `sandbox_draft_${id}`;
 
@@ -476,13 +480,59 @@ export default function SandboxBuilder({
 
     // If hardware board + sensors are selected, generate Arduino code instead
     if (hardwareBoard && hardwareSensors.length > 0) {
+      // ── Auto-detect and inject missing actuators from architecture nodes ──
+      const missingFromNodes = wiringDraft?.nodes
+        ? findActuatorNodesMissingFromHardware(wiringDraft.nodes, hardwareSensors)
+        : [];
+      const missingFromFeatures = analysisDraft?.core_features
+        ? findCoreFeaturesMissingActuators(analysisDraft.core_features, hardwareSensors)
+        : [];
+
+      const allMissing = [...new Map(
+        [...missingFromNodes, ...missingFromFeatures]
+          .map((m) => [m.suggestedComponentId, m])
+      ).values()];
+
+      if (allMissing.length > 0) {
+        const allIds = new Set(COMPONENTS.map((c) => c.id));
+        const autoAdded: string[] = [];
+        const newSensors = [...hardwareSensors];
+        for (const m of allMissing) {
+          if (allIds.has(m.suggestedComponentId) && !newSensors.includes(m.suggestedComponentId)) {
+            newSensors.push(m.suggestedComponentId);
+            autoAdded.push(m.suggestedComponentId);
+          }
+        }
+        // Also add relay if any high-power actuator was added
+        if (autoAdded.some((id) => id === "water-pump" || id === "solenoid-lock")) {
+          if (!newSensors.includes("relay") && !newSensors.includes("mosfet")) {
+            newSensors.push("relay");
+            autoAdded.push("relay");
+          }
+        }
+        if (autoAdded.length > 0) {
+          setHardwareSensors(newSensors);
+          const newNames = { ...sensorNames };
+          autoAdded.forEach((id) => {
+            const comp = COMPONENTS.find((c) => c.id === id);
+            if (comp && !newNames[id]) newNames[id] = comp.name;
+          });
+          setSensorNames(newNames);
+          setAutoAddedActuators(autoAdded);
+        }
+      }
+
       setStreaming(true);
       setError("");
       setStreamingContent("");
       try {
-        const sensorDisplayNames = hardwareSensors.map((id) =>
-          sensorNames[id] || COMPONENTS.find((c) => c.id === id)?.name || id.replace(/^ram-/, "").replace(/-/g, " ")
-        );
+        const sensorDisplayNames = Object.keys(sensorNames).length > 0
+          ? hardwareSensors.map((id) =>
+              sensorNames[id] || COMPONENTS.find((c) => c.id === id)?.name || id.replace(/^ram-/, "").replace(/-/g, " ")
+            )
+          : hardwareSensors.map((id) =>
+              COMPONENTS.find((c) => c.id === id)?.name || id.replace(/^ram-/, "").replace(/-/g, " ")
+            );
         const res = await fetch("/api/sandbox/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -491,6 +541,8 @@ export default function SandboxBuilder({
             boardId: hardwareBoard,
             sensorIds: hardwareSensors,
             sensorDisplayNames,
+            analysis: analysisDraft,
+            architectureNodes: wiringDraft?.nodes,
           }),
         });
         const data = await res.json();
@@ -963,508 +1015,7 @@ export default function SandboxBuilder({
       return typeof raw === "string" ? raw : String(raw);
     };
 
-    // ── Architecture Diagram (column-based pipeline layout, left→right) ──
-    const COLORS = {
-      page:     "#ec4899",
-      service:  "#a855f7",
-      database: "#8b5cf6",
-      external: "#3b82f6",
-      arrow:    "#94a3b8",
-      colEven:  "#f8fafc",
-      colOdd:   "#f1f5f9",
-    };
 
-    const COLUMN_ORDER = ["external", "page", "service"] as const;
-    const COLUMN_LABELS: Record<string, string> = {
-      external: "External / Input",
-      page:     "Client / UI",
-      service:  "Services / Logic",
-    };
-
-    // Sizing variables computed dynamically based on node count
-    const nodesList = wiringDraft?.nodes || [];
-    const totalNodes = nodesList.length;
-
-    let NODE_H = 36;
-    let NODE_GAP_Y = 110;
-    let NODE_W = 165;
-    let DB_W = 145;
-    let nodeFontSizeClass = "text-[11px]";
-    let edgeFontSizeClass = "text-[7.5px]";
-    let yLabelOffset = 6;
-    let verticalLabelOffset = 12;
-
-    if (totalNodes <= 6 && totalNodes > 0) {
-      NODE_H = 46;
-      NODE_GAP_Y = 140;
-      NODE_W = 185;
-      DB_W = 160;
-      nodeFontSizeClass = "text-[13px]";
-      edgeFontSizeClass = "text-[9.5px]";
-      yLabelOffset = 8;
-      verticalLabelOffset = 15;
-    } else if (totalNodes <= 10 && totalNodes > 0) {
-      NODE_H = 40;
-      NODE_GAP_Y = 115;
-      NODE_W = 170;
-      DB_W = 150;
-      nodeFontSizeClass = "text-[11.5px]";
-      edgeFontSizeClass = "text-[8.5px]";
-      yLabelOffset = 7;
-      verticalLabelOffset = 13;
-    } else if (totalNodes > 10) {
-      NODE_H = 32;
-      NODE_GAP_Y = 75;
-      NODE_W = 150;
-      DB_W = 135;
-      nodeFontSizeClass = "text-[9.5px]";
-      edgeFontSizeClass = "text-[7px]";
-      yLabelOffset = 5;
-      verticalLabelOffset = 10;
-    }
-
-    // Helper to dynamically adjust font size based on label length
-    const getFontSize = (label: string, maxW: number) => {
-      const len = label.length;
-      let baseSize = 11;
-      if (nodeFontSizeClass.includes("13")) baseSize = 13;
-      else if (nodeFontSizeClass.includes("11.5")) baseSize = 11.5;
-      else if (nodeFontSizeClass.includes("9.5")) baseSize = 9.5;
-
-      if (len * 6 > maxW) return "text-[8.5px]";
-      if (len * 7.2 > maxW) {
-        if (baseSize === 13) return "text-[11px]";
-        if (baseSize === 11.5) return "text-[9.5px]";
-        return "text-[8.5px]";
-      }
-      return nodeFontSizeClass;
-    };
-
-    // Compute column-based positions with auto-sized nodes
-    function getDiagramLayout(nodes: WiringNode[], edges: WiringEdge[]) {
-      // Group non-database by type; collect database separately
-      const dbs: WiringNode[] = [];
-      const groups: Record<string, WiringNode[]> = { external: [], page: [], service: [] };
-      for (const n of nodes) {
-        if (n.type === "database") dbs.push(n);
-        else if (groups[n.type]) groups[n.type].push(n);
-      }
-
-      // Check which columns are active
-      const activeCols = COLUMN_ORDER.filter((type) => groups[type].length > 0);
-
-      // Compute column layout based on active columns
-      let colMeta: { type: string; x: number; w: number; label: string; cx: number }[] = [];
-      if (activeCols.length === 3) {
-        colMeta = [
-          { type: "external", x: 80, w: 260, label: COLUMN_LABELS.external, cx: 210 },
-          { type: "page", x: 390, w: 260, label: COLUMN_LABELS.page, cx: 520 },
-          { type: "service", x: 700, w: 260, label: COLUMN_LABELS.service, cx: 830 }
-        ];
-      } else if (activeCols.length > 0) {
-        // Collapsed layout for fewer columns
-        const pad = 100;
-        const colGap = 60;
-        const totalGaps = (activeCols.length - 1) * colGap;
-        const availableW = 950 - totalGaps;
-
-        // Weights proportional to node count
-        const weights = activeCols.map((type) => Math.max(1, groups[type].length));
-        const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-
-        let currentStartX = pad;
-        colMeta = activeCols.map((type, idx) => {
-          const w = (weights[idx] / totalWeight) * availableW;
-          const x = currentStartX;
-          const cx = x + w / 2;
-          currentStartX += w + colGap;
-          return { type, x, w, label: COLUMN_LABELS[type], cx };
-        });
-      }
-
-      const colX: Record<string, number> = {};
-      colMeta.forEach((col) => {
-        colX[col.type] = col.cx;
-      });
-
-      const pad = 60;
-      const padY = 80;
-
-      // Compute total height of non-database section to center columns
-      const maxCount = Math.max(1, ...activeCols.map((type) => groups[type].length));
-      const totalHeight = maxCount * NODE_H + (maxCount - 1) * NODE_GAP_Y;
-
-      const positions: Record<string, { x: number; y: number; w: number; h: number; lane: number; color: string }> = {};
-
-      // Position non-database nodes centered vertically
-      for (const type of COLUMN_ORDER) {
-        const g = groups[type];
-        const N = g.length;
-        if (N === 0) continue;
-
-        const colStart = padY + (totalHeight - (N * NODE_H + (N - 1) * NODE_GAP_Y)) / 2;
-        const cx = colX[type];
-        const lane = type === "external" ? 1 : type === "page" ? 2 : 3;
-
-        g.forEach((node, i) => {
-          const y = colStart + i * (NODE_H + NODE_GAP_Y) + NODE_H / 2;
-          positions[node.id] = {
-            x: cx, y, w: NODE_W, h: NODE_H, lane,
-            color: COLORS[node.type] || COLORS.service
-          };
-        });
-      }
-
-      // Position database nodes centered under the service column
-      const dbCenterX = colX.service !== undefined ? colX.service : 575;
-      const dbTopY = padY + totalHeight + 120;
-      const dbY = dbTopY + NODE_H / 2;
-      if (dbs.length > 0) {
-        dbs.forEach((node, i) => {
-          const cx = dbCenterX + (i - (dbs.length - 1) / 2) * 174;
-          positions[node.id] = {
-            x: cx, y: dbY, w: DB_W, h: NODE_H, lane: 4,
-            color: COLORS[node.type] || COLORS.database
-          };
-        });
-      }
-
-      // Orphan resolution
-      let orphanCount = 0;
-      for (const edge of edges) {
-        if (!positions[edge.from]) {
-          const ox = 990;
-          const oy = padY + orphanCount * 80 + NODE_H / 2;
-          positions[edge.from] = { x: ox, y: oy, w: NODE_W, h: NODE_H, lane: 3, color: COLORS.service };
-          orphanCount++;
-        }
-        if (!positions[edge.to]) {
-          const ox = 990;
-          const oy = padY + orphanCount * 80 + NODE_H / 2;
-          positions[edge.to] = { x: ox, y: oy, w: NODE_W, h: NODE_H, lane: 3, color: COLORS.service };
-          orphanCount++;
-        }
-      }
-
-      // Compute attachments for anchor spreading
-      interface Attachment {
-        edgeIndex: number;
-        nodeId: string;
-        side: "left" | "right" | "top" | "bottom";
-        otherNodeId: string;
-        otherX: number;
-        otherY: number;
-      }
-
-      const attachments: Record<string, Attachment[]> = {};
-      nodes.forEach((n) => {
-        attachments[n.id] = [];
-      });
-
-      edges.forEach((edge, idx) => {
-        const fromPos = positions[edge.from];
-        const toPos = positions[edge.to];
-        if (!fromPos || !toPos) return;
-
-        let fromSide: Attachment["side"] = "right";
-        let toSide: Attachment["side"] = "left";
-
-        if (fromPos.lane === toPos.lane) {
-          if (fromPos.y < toPos.y) {
-            fromSide = "bottom";
-            toSide = "top";
-          } else {
-            fromSide = "top";
-            toSide = "bottom";
-          }
-        } else if (fromPos.lane === 4 || toPos.lane === 4) {
-          if (fromPos.lane === 4) {
-            fromSide = "top";
-            toSide = "bottom";
-          } else {
-            fromSide = "bottom";
-            toSide = "top";
-          }
-        } else {
-          if (fromPos.x < toPos.x) {
-            fromSide = "right";
-            toSide = "left";
-          } else {
-            fromSide = "left";
-            toSide = "right";
-          }
-        }
-
-        attachments[edge.from]?.push({
-          edgeIndex: idx,
-          nodeId: edge.from,
-          side: fromSide,
-          otherNodeId: edge.to,
-          otherX: toPos.x,
-          otherY: toPos.y
-        });
-
-        attachments[edge.to]?.push({
-          edgeIndex: idx,
-          nodeId: edge.to,
-          side: toSide,
-          otherNodeId: edge.from,
-          otherX: fromPos.x,
-          otherY: fromPos.y
-        });
-      });
-
-      // Sort attachments to avoid line crossings
-      Object.keys(attachments).forEach((nodeId) => {
-        const list = attachments[nodeId] || [];
-        const bySide: Record<Attachment["side"], Attachment[]> = {
-          left: [], right: [], top: [], bottom: []
-        };
-        list.forEach((att) => bySide[att.side].push(att));
-
-        bySide.left.sort((a, b) => a.otherY - b.otherY || a.otherX - b.otherX);
-        bySide.right.sort((a, b) => a.otherY - b.otherY || a.otherX - b.otherX);
-        bySide.top.sort((a, b) => a.otherX - b.otherX || a.otherY - b.otherY);
-        bySide.bottom.sort((a, b) => a.otherX - b.otherX || a.otherY - b.otherY);
-
-        attachments[nodeId] = [
-          ...bySide.left,
-          ...bySide.right,
-          ...bySide.top,
-          ...bySide.bottom
-        ];
-      });
-
-      // Compute viewW dynamically based on actual columns
-      const lastCol = colMeta.length > 0 ? colMeta[colMeta.length - 1] : null;
-      const viewW = lastCol ? lastCol.x + lastCol.w + 80 : 400;
-      const viewH = dbTopY + NODE_H + 80;
-
-      return { positions, viewW, viewH, nodeW: NODE_W, colMeta, groups, dbs, orphanCount, pad, attachments, padY, totalHeight, dbTopY };
-    }
-
-    // Reusable SVG diagram renderer
-    const renderDiagramSvg = (wide: number, high: number, mini: boolean) => {
-      const nodes = wiringDraft?.nodes || [];
-      const edges = wiringDraft?.edges || [];
-      const { positions, nodeW, colMeta, groups, dbs, orphanCount, pad, attachments, padY, totalHeight, dbTopY } = getDiagramLayout(nodes, edges);
-      // Column height = tallest active column only, not including empty columns
-      const activeGroupLens = colMeta.map((col) => groups[col.type]?.length || 0);
-      const maxGroupLen = activeGroupLens.length > 0 ? Math.max(...activeGroupLens) : 1;
-      const colH = maxGroupLen * (NODE_H + NODE_GAP_Y) + 80;
-
-      // Helper function to get anchor points
-      const getAnchor = (
-        nodeId: string,
-        edgeIndex: number,
-        side: "left" | "right" | "top" | "bottom"
-      ) => {
-        const pos = positions[nodeId];
-        if (!pos) return { x: 0, y: 0 };
-        const list = attachments[nodeId] || [];
-        const sideAttachments = list.filter((att) => att.side === side);
-        const index = sideAttachments.findIndex((att) => att.edgeIndex === edgeIndex);
-        const count = sideAttachments.length;
-
-        const idx = index >= 0 ? index : 0;
-        const cnt = count > 0 ? count : 1;
-
-        if (side === "left") {
-          return {
-            x: pos.x - pos.w / 2,
-            y: pos.y - pos.h / 2 + (idx + 1) * pos.h / (cnt + 1)
-          };
-        } else if (side === "right") {
-          return {
-            x: pos.x + pos.w / 2,
-            y: pos.y - pos.h / 2 + (idx + 1) * pos.h / (cnt + 1)
-          };
-        } else if (side === "top") {
-          return {
-            x: pos.x - pos.w / 2 + (idx + 1) * pos.w / (cnt + 1),
-            y: pos.y - pos.h / 2
-          };
-        } else { // bottom
-          return {
-            x: pos.x - pos.w / 2 + (idx + 1) * pos.w / (cnt + 1),
-            y: pos.y + pos.h / 2
-          };
-        }
-      };
-
-      // Edge path and label positioning with orthogonal routing
-      const getEdgePath = (
-        fromId: string,
-        toId: string,
-        edgeIndex: number
-      ) => {
-        const from = positions[fromId];
-        const to = positions[toId];
-        if (!from || !to) return { d: "", labelX: 0, labelY: 0 };
-
-        let fromSide: "left" | "right" | "top" | "bottom" = "right";
-        let toSide: "left" | "right" | "top" | "bottom" = "left";
-
-        if (from.lane === to.lane) {
-          if (from.y < to.y) {
-            fromSide = "bottom";
-            toSide = "top";
-          } else {
-            fromSide = "top";
-            toSide = "bottom";
-          }
-        } else if (from.lane === 4 || to.lane === 4) {
-          if (from.lane === 4) {
-            fromSide = "top";
-            toSide = "bottom";
-          } else {
-            fromSide = "bottom";
-            toSide = "top";
-          }
-        } else {
-          if (from.x < to.x) {
-            fromSide = "right";
-            toSide = "left";
-          } else {
-            fromSide = "left";
-            toSide = "right";
-          }
-        }
-
-        const p1 = getAnchor(fromId, edgeIndex, fromSide);
-        const p2 = getAnchor(toId, edgeIndex, toSide);
-        const channel = edgeIndex;
-
-        // Routing
-        if (from.lane === to.lane) {
-          const offset = 40 + channel * 12;
-          const xMid = from.x - from.w / 2 - offset;
-          const d = `M ${p1.x} ${p1.y} L ${xMid} ${p1.y} L ${xMid} ${p2.y} L ${p2.x} ${p2.y}`;
-          return {
-            d,
-            labelX: xMid - 10,
-            labelY: (p1.y + p2.y) / 2
-          };
-        }
-
-        if (from.lane === 1 && to.lane === 3) {
-          const routeY = 35 - channel * 10;
-          const d = `M ${p1.x} ${p1.y} L ${from.x + from.w / 2 + 20} ${p1.y} L ${from.x + from.w / 2 + 20} ${routeY} L ${to.x - to.w / 2 - 20} ${routeY} L ${to.x - to.w / 2 - 20} ${p2.y} L ${p2.x} ${p2.y}`;
-          return {
-            d,
-            labelX: (from.x + to.x) / 2,
-            labelY: routeY - yLabelOffset
-          };
-        }
-
-        if (to.lane === 4) {
-          const baseGapY = (padY + totalHeight + dbTopY) / 2;
-          const my_staggered = baseGapY + (channel - 3) * 12;
-          if (Math.abs(p1.x - p2.x) < 5) {
-            const d = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
-            return {
-              d,
-              labelX: p1.x + 12,
-              labelY: (p1.y + p2.y) / 2
-            };
-          } else {
-            const d = `M ${p1.x} ${p1.y} L ${p1.x} ${my_staggered} L ${p2.x} ${my_staggered} L ${p2.x} ${p2.y}`;
-            return {
-              d,
-              labelX: (p1.x + p2.x) / 2,
-              labelY: my_staggered - yLabelOffset
-            };
-          }
-        }
-
-        const mx = (from.x + to.x) / 2;
-        const mx_staggered = mx + (channel - 3) * 12;
-        const d = `M ${p1.x} ${p1.y} L ${mx_staggered} ${p1.y} L ${mx_staggered} ${p2.y} L ${p2.x} ${p2.y}`;
-        return {
-          d,
-          labelX: (p1.x + mx_staggered) / 2,
-          labelY: p1.y - yLabelOffset
-        };
-      };
-
-      return (
-        <svg viewBox={`0 0 ${wide} ${high}`} className="w-full h-auto" style={{ minWidth: mini ? 'auto' : '700px', maxHeight: mini ? `${high}px` : '540px' }}>
-          <defs>
-            <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
-              <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodOpacity="0.14" />
-            </filter>
-            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 1 L 9 5 L 0 9 z" fill={COLORS.arrow} />
-            </marker>
-          </defs>
-
-          {/* Column backgrounds */}
-          {colMeta.map((col, i) => (
-            <g key={`col-${col.type}`}>
-              <rect x={col.x} y={8} width={col.w} height={colH} fill={i % 2 === 0 ? COLORS.colEven : COLORS.colOdd} rx="8" />
-              <text x={col.x + col.w / 2} y={28} textAnchor="middle" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">{col.label}</text>
-            </g>
-          ))}
-
-          {/* Database area background */}
-          {dbs.length > 0 && (() => {
-            const dbY = Math.max(...dbs.map((n) => positions[n.id]?.y ?? 0));
-            const dbW = DB_W;
-            const activeService = positions[nodes.find(n => n.type === "service")?.id || ""];
-            const dbCenterX = activeService ? activeService.x : 575;
-            const rectX = dbCenterX - ((dbs.length - 1) / 2) * 174 - dbW / 2 - 20;
-            const rectW = (dbs.length - 1) * 174 + dbW + 40;
-            return (
-              <g>
-                <rect x={rectX} y={dbY - NODE_H / 2 - 12} width={rectW} height={NODE_H + 24} fill={COLORS.colOdd} rx="8" />
-                <text x={rectX + 12} y={dbY - NODE_H / 2 - 12 + 16} textAnchor="start" className="text-[8px] font-semibold uppercase tracking-wider" fill="#94a3b8">Data / Storage</text>
-              </g>
-            );
-          })()}
-
-          {/* Edges with channel offset for overlap avoidance */}
-          {edges.map((edge, i) => {
-            const from = positions[edge.from];
-            const to = positions[edge.to];
-            if (!from || !to) return null;
-            const { d, labelX, labelY } = getEdgePath(edge.from, edge.to, i);
-            return (
-              <g key={`edge-${i}`}>
-                <path d={d} fill="none" stroke={COLORS.arrow} strokeWidth="1.5" markerEnd="url(#arrow)" />
-                <text x={labelX} y={labelY} textAnchor="middle" className={`${edgeFontSizeClass} font-medium`} fill="#64748b">{edge.label}</text>
-              </g>
-            );
-          })}
-
-          {/* Nodes */}
-          {Object.entries(positions).map(([id, pos]) => {
-            const label = nodes.find((n) => n.id === id)?.label || id;
-            const isDb = pos.lane === 4;
-            const fontSizeClass = getFontSize(label, pos.w - 12);
-            return (
-              <g key={`node-${id}`}>
-                <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={pos.h} rx={9} fill={pos.color} filter="url(#shadow)" />
-                {!isDb && <rect x={pos.x - pos.w / 2} y={pos.y - pos.h / 2} width={pos.w} height={3.5} rx={1.5} fill="white" fillOpacity="0.18" />}
-                <text x={pos.x} y={pos.y + 4} textAnchor="middle" className={`${fontSizeClass} font-bold`} fill="white">{label}</text>
-              </g>
-            );
-          })}
-
-          {/* Legend */}
-          {!mini && (
-            <g transform={`translate(14, ${high - 28})`}>
-              <rect x={0} y={0} width={280} height={22} rx={5} fill="#ffffff" stroke="#e2e8f0" strokeWidth="0.5" filter="url(#shadow)" />
-              {Object.entries({ page: COLORS.page, service: COLORS.service, database: COLORS.database, external: COLORS.external }).map(([key, color], i) => (
-                <g key={key} transform={`translate(${8 + i * 66}, 6)`}>
-                  <rect x={0} y={0} width={9} height={9} rx={2} fill={color} />
-                  <text x={13} y={7.5} className="text-[7px] font-medium" fill="#64748b">{key}</text>
-                </g>
-              ))}
-            </g>
-          )}
-        </svg>
-      );
-    };
 
     // RAM filter
     const filteredRam = ramProducts.filter((p) => {
@@ -1479,14 +1030,10 @@ export default function SandboxBuilder({
       if (hardwareSensors.includes(id)) {
         setHardwareSensors(hardwareSensors.filter((s) => s !== id));
       } else {
-        setHardwareSensors([...hardwareSensors, id]);
+        setHardwareSensors([...new Set([...hardwareSensors, id])]);
         setSensorNames({ ...sensorNames, [id]: p.name });
       }
     };
-
-    const layout = getDiagramLayout(wiringDraft?.nodes || [], wiringDraft?.edges || []);
-    const VIEW_W = layout.viewW;
-    const VIEW_H = layout.viewH;
 
     return (
       <div className="max-w-4xl mx-auto space-y-6">
@@ -1518,50 +1065,7 @@ export default function SandboxBuilder({
                 </div>
 
                 <div className="flex flex-col gap-6">
-                  {/* SVG diagram — fixed hierarchical data-flow */}
-                  <div className="relative bg-[#f8fafc] border border-[#e2e8f0] rounded-xl p-4 min-h-[400px] overflow-x-auto">
-                    {renderDiagramSvg(VIEW_W, VIEW_H, false)}
-                    {/* Fullscreen button */}
-                    <button
-                      onClick={() => setDiagramFullscreen(true)}
-                      className="absolute bottom-3 right-3 flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-[#64748b] bg-white border border-[#e2e8f0] rounded-lg hover:bg-[#f8fafc] hover:text-[#e11d48] transition shadow-sm"
-                      title="Enlarge Diagram"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="15 3 21 3 21 9" />
-                        <polyline points="9 21 3 21 3 15" />
-                        <line x1="21" y1="3" x2="14" y2="10" />
-                        <line x1="3" y1="21" x2="10" y2="14" />
-                      </svg>
-                      Enlarge Diagram
-                    </button>
-                  </div>
-
-                  {/* Fullscreen overlay modal */}
-                  {diagramFullscreen && (
-                    <div
-                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-                      onClick={() => setDiagramFullscreen(false)}
-                    >
-                      <div
-                        className="relative w-[95vw] h-[92vh] bg-white rounded-2xl shadow-2xl overflow-auto p-6"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          onClick={() => setDiagramFullscreen(false)}
-                          className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#64748b] bg-white border border-[#e2e8f0] rounded-lg hover:bg-[#f8fafc] hover:text-[#e11d48] transition shadow-sm"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                          </svg>
-                          Close
-                        </button>
-                        <div className="w-full h-full flex items-center justify-center py-4">
-                          {renderDiagramSvg(VIEW_W, VIEW_H, true)}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  <ArchitectureDiagram nodes={wiringDraft.nodes} edges={wiringDraft.edges} />
 
                   {/* Edit & Regenerate panel — under the diagram */}
                   <div className="border-t border-[#e2e8f0] pt-5 space-y-3">
@@ -1597,7 +1101,7 @@ export default function SandboxBuilder({
                     {wiringDraft.nodes.map((node, i) => (
                       <div key={node.id} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-3 py-2 flex items-center gap-2">
                         <span className={`w-2 h-2 rounded-full shrink-0 ${
-                          node.type === "page" ? "bg-[#ec4899]" : node.type === "service" ? "bg-[#a855f7]" : node.type === "database" ? "bg-[#8b5cf6]" : node.type === "external" ? "bg-[#3b82f6]" : "bg-[#f59e0b]"
+                          node.type === "page" ? "bg-[#ec4899]" : node.type === "service" ? "bg-[#a855f7]" : node.type === "database" ? "bg-[#8b5cf6]" : node.type === "external" ? "bg-[#3b82f6]" : node.type === "controller" ? "bg-[#14b8a6]" : node.type === "actuator" ? "bg-[#ef4444]" : "bg-[#f59e0b]"
                         }`} />
                         <input
                           value={node.label}
@@ -1752,8 +1256,8 @@ export default function SandboxBuilder({
                 {/* Selected sensor chips */}
                 {hardwareSensors.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
-                    {hardwareSensors.map((id) => (
-                      <span key={id} className="inline-flex items-center gap-1 bg-[#fdf2f8] text-[#db2777] text-[10px] px-1.5 py-0.5 rounded border border-[#fbcfe8] max-w-[200px]">
+                    {[...new Set(hardwareSensors)].map((id, si) => (
+                      <span key={`${id}-${si}`} className="inline-flex items-center gap-1 bg-[#fdf2f8] text-[#db2777] text-[10px] px-1.5 py-0.5 rounded border border-[#fbcfe8] max-w-[200px]">
                         <span className="truncate">{sensorDisplayName(id)}</span>
                         <button onClick={() => setHardwareSensors(hardwareSensors.filter((s) => s !== id))} className="shrink-0 hover:text-[#db2777]">
                           <X className="w-2.5 h-2.5" />
@@ -1963,6 +1467,21 @@ export default function SandboxBuilder({
           {error}
           <button onClick={() => setError("")} className="ml-auto text-red-400 hover:text-red-600">
             <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Auto-added actuators info */}
+      {autoAddedActuators.length > 0 && (
+        <div className="mx-4 mt-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-sm text-blue-700 flex items-start gap-2 shrink-0">
+          <Zap className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            Auto-added missing component{autoAddedActuators.length !== 1 ? "s" : ""} from your project architecture:{" "}
+            <strong>{autoAddedActuators.map((id) => COMPONENTS.find((c) => c.id === id)?.name || id.replace(/-/g, " ")).join(", ")}</strong>.
+            Relays/drivers were also added for high-power actuators.
+          </div>
+          <button onClick={() => setAutoAddedActuators([])} className="ml-auto text-blue-400 hover:text-blue-600 shrink-0">
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
