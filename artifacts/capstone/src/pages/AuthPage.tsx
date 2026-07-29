@@ -1,0 +1,106 @@
+import { useState } from 'react';
+import { useLocation } from 'wouter';
+import { Eye, EyeOff, Mail, Lock, User, GraduationCap, Phone, Building2, Users, UserCheck } from 'lucide-react';
+import { Logo } from '@/components/Logo';
+
+export default function AuthPage() {
+  const [, navigate] = useLocation();
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', userType: '', grade: '', phone: '', organization: '' });
+  const [showPw, setShowPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    if (mode === 'register' && form.password !== form.confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+    try {
+      const body: Record<string, string> = { name: form.name, email: form.email, password: form.password };
+      if (mode === 'register') { body.userType = form.userType; body.grade = form.grade; body.phone = form.phone; body.organization = form.organization; }
+      const res = await fetch(`/api/auth/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Something went wrong'); return; }
+      localStorage.setItem('capstone_token', data.token);
+      localStorage.setItem('capstone_user', JSON.stringify(data.user));
+      localStorage.setItem('capstone_signed_in', 'true');
+      navigate('/dashboard');
+    } catch { setError('Could not connect to server'); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-tr from-slate-50 via-white to-pink-50/20 p-4 relative overflow-hidden">
+      <div className="glow-orb bg-[#ec4899] w-[400px] h-[400px] -top-32 -left-32 animate-pulse duration-[7000ms]" />
+      <div className="glow-orb bg-[#a855f7] w-[450px] h-[450px] -bottom-32 -right-32 animate-pulse duration-[9000ms]" />
+      <div className="w-full max-w-md relative z-10">
+        <div className="glass-card rounded-2xl p-8 border border-white/60 shadow-2xl">
+          <div className="text-center mb-8 flex flex-col items-center">
+            <Logo size={48} textSize="text-2xl" />
+            <p className="text-sm text-gray-500 mt-2">{mode === 'login' ? 'Welcome back!' : 'Create your account'}</p>
+          </div>
+          <div className="flex bg-slate-100/50 backdrop-blur-sm rounded-xl p-1 mb-6 border border-gray-200/30">
+            <button onClick={() => { setMode('login'); setError(''); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition duration-300 ${mode === 'login' ? 'bg-white text-[#ec4899] shadow-md border border-gray-100' : 'text-gray-500 hover:text-gray-800'}`}>Sign In</button>
+            <button onClick={() => { setMode('register'); setError(''); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition duration-300 ${mode === 'register' ? 'bg-white text-[#a855f7] shadow-md border border-gray-100' : 'text-gray-500 hover:text-gray-800'}`}>Register</button>
+          </div>
+          {error && <div className="bg-red-50 border border-red-200 text-red-600 text-xs p-3 rounded-lg mb-4">{error}</div>}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {mode === 'register' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Full Name</label>
+                  <div className="relative"><User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ahmed Hassan" className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none" required /></div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">I am a...</label>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setForm({ ...form, userType: 'student' })} className={`flex-1 flex items-center justify-center gap-2 py-2.5 border rounded-lg text-sm font-medium transition ${form.userType === 'student' ? 'border-[#ec4899] bg-[#ec4899]/5 text-[#db2777]' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}><GraduationCap className="w-4 h-4" /> Student</button>
+                    <button type="button" onClick={() => setForm({ ...form, userType: 'mentor' })} className={`flex-1 flex items-center justify-center gap-2 py-2.5 border rounded-lg text-sm font-medium transition ${form.userType === 'mentor' ? 'border-[#ec4899] bg-[#ec4899]/5 text-[#db2777]' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}><UserCheck className="w-4 h-4" /> Mentor</button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">{form.userType === 'student' ? 'Grade' : 'Academic Level'}</label>
+                  <div className="relative"><GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none bg-white appearance-none text-gray-700"><option value="">Select...</option><option value="9">Grade 9</option><option value="10">Grade 10</option><option value="11">Grade 11</option><option value="12">Grade 12</option><option value="Undergraduate">Undergraduate</option><option value="Other">Other</option></select></div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Phone Number</label>
+                  <div className="relative"><Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="e.g. +20 100 123 4567" className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none" /></div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Organization</label>
+                  <div className="relative"><Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input type="text" value={form.organization} onChange={(e) => setForm({ ...form, organization: e.target.value })} placeholder="e.g. Cairo University" className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none" /></div>
+                </div>
+              </>
+            )}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Email</label>
+              <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="student@school.edu.eg" className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none" required /></div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Password</label>
+              <div className="relative"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input type={showPw ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min. 6 characters" className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none" required minLength={6} /><button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">{showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
+            </div>
+            {mode === 'register' && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Confirm Password</label>
+                <div className="relative"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input type={showConfirmPw ? 'text' : 'password'} value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} placeholder="Repeat your password" className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#ec4899] focus:border-transparent outline-none" required minLength={6} /><button type="button" onClick={() => setShowConfirmPw(!showConfirmPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">{showConfirmPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
+              </div>
+            )}
+            <button type="submit" disabled={loading} className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition disabled:opacity-50 shadow-sm">
+              {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+          </form>
+          <p className="text-center text-xs text-gray-400 mt-6">
+            {mode === 'login' ? (<>Don&apos;t have an account? <button onClick={() => { setMode('register'); setError(''); }} className="text-[#ec4899] hover:text-[#db2777] font-semibold">Register</button></>) : (<>Already have an account? <button onClick={() => { setMode('login'); setError(''); }} className="text-blue-500 hover:text-blue-600 font-semibold">Sign In</button></>)}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

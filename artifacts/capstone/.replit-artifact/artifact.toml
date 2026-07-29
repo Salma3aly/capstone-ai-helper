@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Capstone"
+version = "1.0.0"
+id = "artifacts/capstone"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26117
+
+[services.development]
+run = "pnpm --filter @workspace/capstone run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/capstone", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/capstone/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26117"
+BASE_PATH = "/"
