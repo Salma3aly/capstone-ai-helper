@@ -113,7 +113,7 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
     <>
       {sidebarOpen && <div className="fixed inset-0 bg-black/20 z-20 md:hidden" onClick={onClose} />}
 
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-60 bg-white border-r border-[#e2e8f0] flex flex-col overflow-hidden shrink-0 transition-transform duration-200`}>
+      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-60 bg-white border-r border-[#e2e8f0] flex flex-col overflow-hidden shrink-0 transition-transform duration-200 noise-overlay`}>
         <div className="p-4 border-b border-[#e2e8f0] flex items-center justify-between">
           <Link href="/" className="hover:opacity-80 transition">
             <Logo size={32} textSize="text-lg" />
@@ -126,12 +126,13 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
             const isActive = pathname === f.href;
             return (
               <Link key={f.id} href={f.href} onClick={onClose}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
+                className={`relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition overflow-hidden ${
                   isActive
                     ? 'bg-[#fdf2f8] text-[#ec4899] font-semibold'
                     : 'text-[#64748b] hover:bg-[#fdf2f8] hover:text-[#ec4899]'
                 }`}
               >
+                {isActive && <span className="nav-active-indicator" />}
                 <span className="shrink-0">{NAV_ICONS[f.id]}</span>
                 <span className="truncate">{f.label}</span>
               </Link>
@@ -196,7 +197,7 @@ function ChatPanel() {
   return (
     <>
       {!chatOpen && showGreeting && (
-        <div className="fixed bottom-9 right-[5.5rem] z-50 flex items-center gap-2 bg-white border border-[#e2e8f0] rounded-xl px-4 py-2 shadow-md text-sm text-[#0f172a]">
+        <div className="fixed bottom-9 right-[5.5rem] z-50 flex items-center gap-2 bg-white border border-[#e2e8f0] rounded-xl px-4 py-2 shadow-md text-sm text-[#0f172a] fade-up">
           <span className="whitespace-nowrap">Hey! I'm Lipo — your project sidekick. Need a hand?</span>
           <button onClick={() => setShowGreeting(false)} className="p-0.5 rounded text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition shrink-0">
             <X className="w-3.5 h-3.5" />
@@ -205,7 +206,7 @@ function ChatPanel() {
       )}
       <button onClick={() => setChatOpen(!chatOpen)}
         aria-label={chatOpen ? "Close chat" : "Open chat"}
-        className="fixed bottom-6 right-6 w-16 h-16 rounded-full bg-white text-[#ec4899] flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition z-50 border border-[#e2e8f0]"
+        className="fixed bottom-6 right-6 w-16 h-16 rounded-full bg-white text-[#ec4899] flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition z-50 border border-[#e2e8f0] pulse-ring"
       >
         {chatOpen ? <X className="w-6 h-6" /> : <AiAvatar size={56} />}
       </button>

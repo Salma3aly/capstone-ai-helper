@@ -283,22 +283,13 @@ export default function ArchitectureDiagram({ nodes = [], edges = [] }: Architec
       {/* Column background panels */}
       <g>
         {/* Column 1 background */}
-        <rect x={c1 - 150} y={10} width={300} height={colH} fill="#f8fafc" rx="12" stroke="#e2e8f0" strokeWidth="1" />
-        <text x={c1} y={32} textAnchor="middle" className="text-[10px] font-bold uppercase tracking-widest" fill="#94a3b8">
-          Input / External
-        </text>
+        <rect x={c1 - 150} y={10} width={300} height={colH} fill="#ffffff" rx="12" stroke="#e2e8f0" strokeWidth="1" />
 
         {/* Column 2 background */}
-        <rect x={c2 - 150} y={10} width={300} height={colH} fill="#f8fafc" rx="12" stroke="#e2e8f0" strokeWidth="1" />
-        <text x={c2} y={32} textAnchor="middle" className="text-[10px] font-bold uppercase tracking-widest" fill="#94a3b8">
-          Processing / Logic
-        </text>
+        <rect x={c2 - 150} y={10} width={300} height={colH} fill="#ffffff" rx="12" stroke="#e2e8f0" strokeWidth="1" />
 
         {/* Column 3 background */}
-        <rect x={c3 - 150} y={10} width={300} height={colH} fill="#f8fafc" rx="12" stroke="#e2e8f0" strokeWidth="1" />
-        <text x={c3} y={32} textAnchor="middle" className="text-[10px] font-bold uppercase tracking-widest" fill="#94a3b8">
-          Output / Actuators
-        </text>
+        <rect x={c3 - 150} y={10} width={300} height={colH} fill="#ffffff" rx="12" stroke="#e2e8f0" strokeWidth="1" />
       </g>
 
       {/* Database section background panel */}
@@ -309,20 +300,12 @@ export default function ArchitectureDiagram({ nodes = [], edges = [] }: Architec
             y={dbTop - 20}
             width={(groups.data.length - 1) * 174 + DB_W + 60}
             height={NODE_H + 40}
-            fill="#f1f5f9"
+            fill="#ffffff"
             rx="12"
             stroke="#e2e8f0"
             strokeWidth="1"
           />
-          <text
-            x={c2 - ((groups.data.length - 1) * 174 + DB_W + 60) / 2 + 16}
-            y={dbTop - 4}
-            textAnchor="start"
-            className="text-[9px] font-bold uppercase tracking-widest"
-            fill="#94a3b8"
-          >
-            Storage Layer
-          </text>
+
         </g>
       )}
 
@@ -432,42 +415,12 @@ export default function ArchitectureDiagram({ nodes = [], edges = [] }: Architec
               </text>
             </g>
 
-            {/* Subtle type-badge in white semi-transparent */}
-            <text
-              x={p.x + p.w / 2 - 12}
-              y={p.y + p.h / 2 - 8}
-              textAnchor="end"
-              className="text-[8px] font-medium uppercase fill-white/80 tracking-wide"
-            >
-              {p.typeKey}
-            </text>
+
           </g>
         );
       })}
 
-      {/* Legend showing types present in the project */}
-      {typesPresent.length > 0 && (
-        <g transform={`translate(16, ${viewH - 30})`}>
-          <rect
-            x={0}
-            y={0}
-            width={typesPresent.length * 90 + 16}
-            height={20}
-            rx="6"
-            fill="white"
-            stroke="#e2e8f0"
-            strokeWidth="1"
-          />
-          {typesPresent.map((t, i) => (
-            <g key={`legend-${t}`} transform={`translate(${8 + i * 90}, 5)`}>
-              <rect x={0} y={0} width={10} height={10} rx="3" fill={COLOR_PALETTE[t] || "#cbd5e1"} />
-              <text x={14} y={8} className="text-[8px] font-bold text-[#64748b] capitalize">
-                {t}
-              </text>
-            </g>
-          ))}
-        </g>
-      )}
+
     </svg>
   );
 

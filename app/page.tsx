@@ -183,7 +183,10 @@ export default function HomePage() {
       </nav>
 
       {/* ─── Hero ─── */}
-      <section className="bg-[#f8fafc] relative overflow-hidden">
+      <section className="hero-mesh relative overflow-hidden">
+        <div className="glow-orb orb-animate bg-[#ec4899] w-[500px] h-[500px] -top-48 -left-48" />
+        <div className="glow-orb orb-animate-2 bg-[#a855f7] w-[450px] h-[450px] -bottom-32 -right-24" />
+        <div className="glow-orb orb-animate-3 bg-[#3b82f6] w-[350px] h-[350px] top-1/2 right-1/4" />
         <BlueprintBackground className="max-w-6xl mx-auto px-4 py-20 md:py-32 flex flex-col items-center gap-10 relative z-10">
           <div className="w-full max-w-2xl space-y-6 text-center relative z-10">
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight text-[#0f172a] tracking-tight">
@@ -208,13 +211,14 @@ export default function HomePage() {
       {/* ─── Features ─── */}
       <section id="features" className="py-20 bg-white relative">
         <div className="max-w-6xl mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight">Everything You Need in One Place</h2>
+          <div className="text-center mb-12 fade-up">
+            <span className="section-tag"><Sparkles className="w-3 h-3" />Features</span>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight mt-4">Everything You Need in One Place</h2>
             <p className="text-[#64748b] mt-2 text-sm">Five integrated tools to take your project from idea to completion.</p>
           </div>
           <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
             {FEATURES.map((f, i) => (
-              <div key={i} className="p-4 bg-white border border-[#e2e8f0] rounded-2xl hover-glow-card group flex items-start gap-4">
+              <div key={i} className="animate-card p-4 bg-white border border-[#e2e8f0] rounded-2xl hover-glow-card group flex items-start gap-4">
                 <div className="w-12 h-12 shrink-0 rounded-xl bg-[#f8fafc] flex items-center justify-center text-[#ec4899] group-hover:bg-[#ec4899] group-hover:text-white group-hover:scale-110 transition duration-300 shadow-sm">
                   {f.icon}
                 </div>
@@ -231,13 +235,14 @@ export default function HomePage() {
       {/* ─── How It Works ─── */}
       <section id="how-it-works" className="py-20 bg-[#f8fafc]">
         <div className="max-w-6xl mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight">How It Works</h2>
+          <div className="text-center mb-12 fade-up">
+            <span className="section-tag"><BarChart3 className="w-3 h-3" />Process</span>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight mt-4">How It Works</h2>
             <p className="text-[#64748b] mt-2 text-sm">From idea to presentation in 5 simple steps.</p>
           </div>
           <div className="grid md:grid-cols-5 gap-6">
             {STEPS.map((step) => (
-              <div key={step.num} className="text-center p-6 bg-white border border-[#e2e8f0] rounded-2xl shadow-sm hover:shadow-md transition relative">
+              <div key={step.num} className="step-connector text-center p-6 bg-white border border-[#e2e8f0] rounded-2xl shadow-sm hover:shadow-md transition relative fade-up" style={{animationDelay: `${step.num * 0.1}s`}}>
                 <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gradient-to-tr from-[#ec4899] to-[#a855f7] text-white flex items-center justify-center font-extrabold text-lg shadow-md">
                   {step.num}
                 </div>
@@ -252,8 +257,9 @@ export default function HomePage() {
       {/* ─── Tools Grid ─── */}
       <section id="tools" className="py-20 bg-white">
         <div className="max-w-6xl mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight">Explore Your Tools</h2>
+          <div className="text-center mb-12 fade-up">
+            <span className="section-tag"><Beaker className="w-3 h-3" />Tools</span>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight mt-4">Explore Your Tools</h2>
             <p className="text-[#64748b] mt-2 text-sm">Click any tool to start building.</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -262,11 +268,11 @@ export default function HomePage() {
                 { icon: Beaker, title: 'Sandbox Wizard', href: '/sandbox' },
                 { icon: FileText, title: 'Citation Generator', href: '/citation' },
                 { icon: BookOpen, title: 'Research Hub', href: '/hub' },
-              ].map((tool) => (
+              ].map((tool, i) => (
                 <a
                   key={tool.title}
                   href={tool.href}
-                  className="p-6 bg-white border border-[#e2e8f0] rounded-2xl hover-glow-card group text-center flex flex-col justify-between"
+                  className="tool-card p-6 bg-white border border-[#e2e8f0] rounded-2xl group text-center flex flex-col justify-between"
                 >
                   <div>
                     <div className="mb-4 flex items-center justify-center">
@@ -286,19 +292,22 @@ export default function HomePage() {
       {/* ─── FAQ ─── */}
       <section id="faq" className="py-20 bg-[#f8fafc]">
         <div className="max-w-3xl mx-auto px-4">
-          <h2 className="text-3xl font-bold text-center text-[#0f172a] mb-10">Frequently Asked Questions</h2>
+          <div className="text-center mb-10 fade-up">
+            <span className="section-tag"><MessageCircle className="w-3 h-3" />FAQ</span>
+            <h2 className="text-3xl font-bold text-[#0f172a] tracking-tight mt-4">Frequently Asked Questions</h2>
+          </div>
           <div className="space-y-3">
             {FAQS.map((faq, i) => (
-              <div key={i} className="border border-[#e2e8f0] rounded-xl bg-white overflow-hidden">
+              <div key={i} className="border border-[#e2e8f0] rounded-xl bg-white overflow-hidden hover-glow-card transition-all">
                 <button
                   onClick={() => setOpenFaq(openFaq === i ? null : i)}
                   className="w-full flex items-center justify-between p-5 text-left font-medium text-[#0f172a] hover:bg-[#f8fafc] transition"
                 >
                   {faq.q}
-                  <ChevronDown className={`w-4 h-4 text-[#64748b] transition-transform ${openFaq === i ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-4 h-4 text-[#64748b] transition-transform duration-300 ${openFaq === i ? 'rotate-180' : ''}`} />
                 </button>
-                <div className={`overflow-hidden transition-all ${openFaq === i ? 'max-h-40 pb-5 px-5' : 'max-h-0'}`}>
-                  <p className="text-sm text-[#64748b] leading-relaxed">{faq.a}</p>
+                <div className={`overflow-hidden transition-all duration-300 ${openFaq === i ? 'max-h-40 pb-5 px-5' : 'max-h-0'}`}>
+                  {openFaq === i && <p className="text-sm text-[#64748b] leading-relaxed faq-answer-enter">{faq.a}</p>}
                 </div>
               </div>
             ))}
@@ -307,19 +316,20 @@ export default function HomePage() {
       </section>
 
       {/* ─── CTA ─── */}
-      <section className="py-20 bg-[#0f172a]">
-        <div className="max-w-3xl mx-auto px-4 text-center text-white">
+      <section className="py-20 bg-[#0f172a] relative overflow-hidden">
+        <div className="absolute inset-0 blueprint-grid opacity-30" />
+        <div className="max-w-3xl mx-auto px-4 text-center text-white relative z-10">
           <h2 className="text-3xl font-bold mb-4">Ready to Start Your Capstone?</h2>
           <p className="text-white/60 mb-8">Join students and makers using AI to build better projects.</p>
-          <button onClick={() => router.push(signedIn ? '/dashboard' : '/auth')} className="px-10 py-3 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition shadow-sm">
+          <ShimmerButton onClick={() => router.push(signedIn ? '/dashboard' : '/auth')}>
             {signedIn ? 'Dashboard' : 'Get Started Free'}
-          </button>
+          </ShimmerButton>
         </div>
       </section>
 
       {/* ─── Floating Chat Button ─── */}
       {!chatOpen && showGreeting && (
-        <div className="fixed bottom-9 right-[5.5rem] z-50 flex items-center gap-2 bg-white border border-[#e2e8f0] rounded-xl px-4 py-2 shadow-md text-sm text-[#0f172a]">
+        <div className="fixed bottom-9 right-[5.5rem] z-50 flex items-center gap-2 bg-white border border-[#e2e8f0] rounded-xl px-4 py-2 shadow-md text-sm text-[#0f172a] fade-up">
           <span className="whitespace-nowrap">Hey! I'm Lipo — your project sidekick. Need a hand?</span>
           <button onClick={() => setShowGreeting(false)} className="p-0.5 rounded text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f1f5f9] transition shrink-0">
             <X className="w-3.5 h-3.5" />
@@ -328,7 +338,7 @@ export default function HomePage() {
       )}
       <button
         onClick={() => setChatOpen(!chatOpen)}
-        className="fixed bottom-6 right-6 w-16 h-16 rounded-full bg-white text-[#ec4899] flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition z-50 border border-[#e2e8f0]"
+        className="fixed bottom-6 right-6 w-16 h-16 rounded-full bg-white text-[#ec4899] flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition z-50 border border-[#e2e8f0] pulse-ring"
       >
         {chatOpen ? <X className="w-6 h-6" /> : <AiAvatar size={56} />}
       </button>

@@ -11,8 +11,9 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "Capstone",
   icons: {
-    icon: "/Logopp.png",
-    apple: "/Logopp.png",
+    icon: "/favicon-logo-32.png",
+    apple: "/apple-touch-icon.png",
+    shortcut: "/favicon-logo-16.png",
   },
 };
 

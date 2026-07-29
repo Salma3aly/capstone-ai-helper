@@ -48,26 +48,32 @@ export async function createProject(data: {
   title: string;
   rawIdea: string;
 }): Promise<SandboxProject> {
-  return apiFetch<{ project: SandboxProject }>("/api/sandbox/projects", {
+  const project = await apiFetch<{ project: SandboxProject }>("/api/sandbox/projects", {
     method: "POST",
     body: JSON.stringify(data),
   }).then((r) => r.project);
+  saveLocalProject(project);
+  return project;
 }
 
 export async function updateProject(
   id: string,
   data: Partial<SandboxProject>
 ): Promise<SandboxProject> {
-  return apiFetch<{ project: SandboxProject }>("/api/sandbox/projects", {
+  const project = await apiFetch<{ project: SandboxProject }>("/api/sandbox/projects", {
     method: "PUT",
     body: JSON.stringify({ id, ...data }),
   }).then((r) => r.project);
+  saveLocalProject(project);
+  return project;
 }
 
 export async function deleteProject(id: string): Promise<{ ok: boolean }> {
-  return apiFetch<{ ok: boolean }>(`/api/sandbox/projects/${id}`, {
+  const result = await apiFetch<{ ok: boolean }>(`/api/sandbox/projects/${id}`, {
     method: "DELETE",
   });
+  removeLocalProject(id);
+  return result;
 }
 
 // ─── Local storage fallback ────────────────────────────────────────────

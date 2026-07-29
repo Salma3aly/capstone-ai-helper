@@ -5,6 +5,7 @@ import {
   Sparkles, Loader2, AlertCircle, ArrowLeft, ArrowRight,
   Check, Save, FileCode, Share2, Download, Trash2, RefreshCw,
   Edit3, Braces, Box, Network, Zap, Search, ChevronDown, X,
+  Send, MessageCircle,
 } from "lucide-react";
 import type {
   SandboxProject, SandboxStage, IdeaAnalysis, SavedProject,
@@ -12,7 +13,7 @@ import type {
   WiringNode, WiringEdge,
 } from "@/lib/sandbox/types";
 import {
-  getProject, updateProject, createProject,
+  getProject, updateProject, createProject, saveLocalProject,
 } from "@/lib/sandbox/store";
 import { BreadboardSimulator } from "@/components/sandbox/BreadboardSimulator";
 import { BOARD_COMPONENTS, COMPONENTS } from "@/lib/sandbox/components";
@@ -58,6 +59,7 @@ export default function SandboxBuilder({
   const [project, setProject] = useState<SandboxProject | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState("");
 
   // Editable copies per stage (mutated before advancing)
@@ -69,8 +71,6 @@ export default function SandboxBuilder({
   // Streaming code
   const [streamingContent, setStreamingContent] = useState("");
   const [streaming, setStreaming] = useState(false);
-
-
 
   // ── Hardware wiring state ─────────────────────────────────────────
   const [hardwareBoard, setHardwareBoard] = useState("");
@@ -86,6 +86,8 @@ export default function SandboxBuilder({
   const [hwOpen, setHwOpen] = useState(false);
 
   const hwDropdownRef = useRef<HTMLDivElement>(null);
+
+
 
   // ── Missing actuator detection ─────────────────────────────────
   const [autoAddedActuators, setAutoAddedActuators] = useState<string[]>([]);
@@ -209,6 +211,142 @@ export default function SandboxBuilder({
   const stage = project?.stage || "idea";
   const meta = STAGE_META[stage];
   const isLastStage = stage === "code";
+
+  // ── AI Tutor chat state
+  const [tutorOpen, setTutorOpen] = useState(false);
+  const [tutorMessages, setTutorMessages] = useState<{ role: string; content: string }[]>([]);
+  const [tutorInput, setTutorInput] = useState("");
+  const [tutorLoading, setTutorLoading] = useState(false);
+  const tutorEndRef = useRef<HTMLDivElement>(null);
+  const tutorReplyRef = useRef("");
+
+  const [tutorInitDone, setTutorInitDone] = useState(false);
+
+  useEffect(() => {
+    tutorEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [tutorMessages]);
+
+  useEffect(() => {
+    if (!tutorOpen || tutorInitDone) return;
+    setTutorInitDone(true);
+    const msg = "I'm working on my capstone project. Can you help me understand what I'm building?";
+    setTutorMessages([{ role: "user", content: msg }]);
+    (async () => {
+      setTutorLoading(true);
+      tutorReplyRef.current = "";
+      try {
+        const res = await fetch("/api/sandbox/tutor-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [],
+            projectContext: buildTutorContext(),
+            userMessage: msg,
+          }),
+        });
+        if (!res.ok || !res.body) throw new Error("Failed");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        setTutorMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          tutorReplyRef.current += decoder.decode(value, { stream: true });
+          setTutorMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: "assistant", content: tutorReplyRef.current };
+            return updated;
+          });
+        }
+      } catch {
+        // ignore initial greeting failure
+      } finally {
+        setTutorLoading(false);
+      }
+    })();
+  }, [tutorOpen]);
+
+  const buildTutorContext = useCallback(() => {
+    return {
+      idea: project?.rawIdea || "",
+      analysis: analysisDraft,
+      components: componentsDraft,
+      wiring: wiringDraft,
+      code: codeDraft,
+      board: hardwareBoard ? BOARD_COMPONENTS.find((c) => c.id === hardwareBoard)?.name : "",
+      sensors: hardwareSensors.map((id) => {
+        const comp = COMPONENTS.find((c) => c.id === id);
+        return sensorNames[id] || comp?.name || id.replace(/^ram-/, "").replace(/-/g, " ");
+      }),
+    };
+  }, [project, analysisDraft, componentsDraft, wiringDraft, codeDraft, hardwareBoard, hardwareSensors, sensorNames]);
+
+  const sendTutorMessage = useCallback(async (text: string) => {
+    if (!text.trim() || tutorLoading) return;
+    setTutorMessages((prev) => [...prev, { role: "user", content: text }]);
+    setTutorLoading(true);
+    tutorReplyRef.current = "";
+    try {
+      const res = await fetch("/api/sandbox/tutor-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: tutorMessages,
+          projectContext: buildTutorContext(),
+          userMessage: text,
+        }),
+      });
+      if (!res.ok || !res.body) throw new Error("Failed");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      setTutorMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        tutorReplyRef.current += decoder.decode(value, { stream: true });
+        setTutorMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: "assistant", content: tutorReplyRef.current };
+          return updated;
+        });
+      }
+    } catch {
+      setTutorMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Sorry, I couldn't process that. Try again." },
+      ]);
+    } finally {
+      setTutorLoading(false);
+    }
+  }, [tutorMessages, tutorLoading, buildTutorContext]);
+
+  const handleTutorSend = useCallback((text?: string) => {
+    const msg = (text ?? tutorInput).trim();
+    if (!msg || tutorLoading) return;
+    setTutorInput("");
+    sendTutorMessage(msg);
+  }, [tutorInput, tutorLoading, sendTutorMessage]);
+
+  const tutorSuggestedQuestions = useCallback((): string[] => {
+    const qs: string[] = [];
+    if (stage === "idea" || stage === "analyzed") {
+      qs.push("Explain what I'm building in simple terms");
+      qs.push("What technologies would work best for this?");
+    }
+    if (stage === "components" || stage === "wiring") {
+      qs.push("How do the components connect together?");
+    }
+    if (hardwareBoard && hardwareSensors.length > 0) {
+      qs.push("Explain my hardware wiring and how it works");
+      qs.push("How does signal flow from sensors to the board?");
+    }
+    if (stage === "code" && codeDraft) {
+      qs.push("Explain the generated code structure");
+      qs.push("How do I deploy this to my board?");
+    }
+    qs.push("What should I do next to complete my project?");
+    return qs.slice(0, 4);
+  }, [stage, hardwareBoard, hardwareSensors, codeDraft]);
 
   // ── Hardware wiring auto-recalculate on user changes (debounced) ──
   useEffect(() => {
@@ -711,6 +849,8 @@ export default function SandboxBuilder({
       const updated = await updateProject(project.id, updates);
       setProject(updated);
       clearDraft();
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
 
       // Sync to My Projects (localStorage under capstone-projects key)
       const boardComp = BOARD_COMPONENTS.find((c) => c.id === hardwareBoard);
@@ -1422,6 +1562,71 @@ export default function SandboxBuilder({
     </div>
   );
 
+  // ── AI Tutor sidebar component (desktop inline) ────────────────
+  const tutorSidebar = (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#e2e8f0] shrink-0">
+        <div className="flex items-center gap-2">
+          <MessageCircle className="w-4 h-4 text-[#ec4899]" />
+          <h3 className="font-semibold text-sm text-[#0f172a]">AI Tutor</h3>
+          <span className="text-[10px] text-[#94a3b8] hidden sm:inline">Sandbox context</span>
+        </div>
+      </div>
+
+      <div className="px-3 py-2 border-b border-[#e2e8f0] flex flex-wrap gap-1 shrink-0">
+        {tutorSuggestedQuestions().map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => handleTutorSend(q)}
+            disabled={tutorLoading}
+            className="text-[10px] px-2 py-1 rounded-full bg-[#fdf2f8] text-[#ec4899] hover:bg-[#fce7f3] transition disabled:opacity-50"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {tutorMessages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div
+              className={`max-w-[90%] px-3 py-2 rounded-lg text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-[#ec4899] text-white rounded-br-sm"
+                  : "bg-[#f8fafc] text-[#0f172a] rounded-bl-sm"
+              }`}
+            >
+              {msg.content || (tutorLoading && i === tutorMessages.length - 1 ? "▊" : "")}
+            </div>
+          </div>
+        ))}
+        <div ref={tutorEndRef} />
+      </div>
+
+      <form
+        onSubmit={(e) => { e.preventDefault(); handleTutorSend(); }}
+        className="p-3 border-t border-[#e2e8f0] flex gap-2 shrink-0"
+      >
+        <input
+          type="text"
+          value={tutorInput}
+          onChange={(e) => setTutorInput(e.target.value)}
+          placeholder="Ask about your project..."
+          className="flex-1 px-3 py-2 border border-[#e2e8f0] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#ec4899] focus:border-transparent transition"
+          disabled={tutorLoading}
+        />
+        <button
+          type="submit"
+          disabled={tutorLoading || !tutorInput.trim()}
+          className="px-3 py-2 bg-[#ec4899] text-white rounded-lg hover:bg-[#db2777] transition disabled:opacity-50"
+        >
+          <Send className="w-4 h-4" />
+        </button>
+      </form>
+    </div>
+  );
+
   // ── Main render ──────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-[#f8fafc]">
@@ -1448,9 +1653,9 @@ export default function SandboxBuilder({
         <div className="flex items-center gap-2">
           {project && stage !== "idea" && (
             <>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#ec4899] hover:bg-[#db2777] disabled:bg-[#94a3b8] rounded-lg transition shadow-sm">
-                <Save className="w-3.5 h-3.5" />
-                {saving ? "Saving..." : "Save"}
+              <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition shadow-sm disabled:cursor-not-allowed" style={{ backgroundColor: saveSuccess ? '#22c55e' : (saving ? '#94a3b8' : '#ec4899') }}>
+                {saveSuccess ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                {saveSuccess ? "Saved!" : (saving ? "Saving..." : "Save")}
               </button>
               <button onClick={() => router.push("/sandbox")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#64748b] hover:text-red-600 rounded-lg transition">
                 <RefreshCw className="w-3.5 h-3.5" /> New
@@ -1460,44 +1665,109 @@ export default function SandboxBuilder({
         </div>
       </div>
 
-      {/* Error banner */}
-      {error && (
-        <div className="mx-4 mt-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700 flex items-center gap-2 shrink-0">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          {error}
-          <button onClick={() => setError("")} className="ml-auto text-red-400 hover:text-red-600">
-            <ArrowRight className="w-3 h-3" />
-          </button>
+      {/* Desktop: sidebar chat + content side by side */}
+      <div className="hidden lg:flex flex-1 overflow-hidden">
+        <div className="w-[380px] shrink-0 border-r border-[#e2e8f0] bg-white">
+          {tutorSidebar}
         </div>
-      )}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Error banner */}
+          {error && (
+            <div className="mx-4 mt-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700 flex items-center gap-2 shrink-0">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
+              <button onClick={() => setError("")} className="ml-auto text-red-400 hover:text-red-600">
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          )}
 
-      {/* Auto-added actuators info */}
-      {autoAddedActuators.length > 0 && (
-        <div className="mx-4 mt-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-sm text-blue-700 flex items-start gap-2 shrink-0">
-          <Zap className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            Auto-added missing component{autoAddedActuators.length !== 1 ? "s" : ""} from your project architecture:{" "}
-            <strong>{autoAddedActuators.map((id) => COMPONENTS.find((c) => c.id === id)?.name || id.replace(/-/g, " ")).join(", ")}</strong>.
-            Relays/drivers were also added for high-power actuators.
+          {/* Auto-added actuators info */}
+          {autoAddedActuators.length > 0 && (
+            <div className="mx-4 mt-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-sm text-blue-700 flex items-start gap-2 shrink-0">
+              <Zap className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                Auto-added missing component{autoAddedActuators.length !== 1 ? "s" : ""} from your project architecture:{" "}
+                <strong>{autoAddedActuators.map((id) => COMPONENTS.find((c) => c.id === id)?.name || id.replace(/-/g, " ")).join(", ")}</strong>.
+                Relays/drivers were also added for high-power actuators.
+              </div>
+              <button onClick={() => setAutoAddedActuators([])} className="ml-auto text-blue-400 hover:text-blue-600 shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Stage title */}
+          <div className="px-6 pt-4 pb-2 shrink-0">
+            <h1 className="text-xl font-bold text-[#0f172a]">{project.analysis?.title || project.title}</h1>
           </div>
-          <button onClick={() => setAutoAddedActuators([])} className="ml-auto text-blue-400 hover:text-blue-600 shrink-0">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
 
-      {/* Stage title */}
-      <div className="px-6 pt-4 pb-2 shrink-0">
-        <h1 className="text-xl font-bold text-[#0f172a]">{project.analysis?.title || project.title}</h1>
+          {/* Step content */}
+          <div className="flex-1 overflow-y-auto px-6 pb-8">
+            {stage === "idea" && renderIdeaStep()}
+            {stage === "analyzed" && renderAnalysisStep()}
+            {stage === "components" && renderComponentsStep()}
+            {stage === "wiring" && renderWiringStep()}
+            {stage === "code" && renderCodeStep()}
+          </div>
+        </div>
       </div>
 
-      {/* Step content */}
-      <div className="flex-1 overflow-y-auto px-6 pb-8">
-        {stage === "idea" && renderIdeaStep()}
-        {stage === "analyzed" && renderAnalysisStep()}
-        {stage === "components" && renderComponentsStep()}
-        {stage === "wiring" && renderWiringStep()}
-        {stage === "code" && renderCodeStep()}
+      {/* Mobile: stacked layout with floating tutor */}
+      <div className="flex lg:hidden flex-1 flex-col overflow-hidden">
+        {error && (
+          <div className="mx-4 mt-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700 flex items-center gap-2 shrink-0">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
+            <button onClick={() => setError("")} className="ml-auto text-red-400 hover:text-red-600">
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        {autoAddedActuators.length > 0 && (
+          <div className="mx-4 mt-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-sm text-blue-700 flex items-start gap-2 shrink-0">
+            <Zap className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              Auto-added missing component{autoAddedActuators.length !== 1 ? "s" : ""} from your project architecture:{" "}
+              <strong>{autoAddedActuators.map((id) => COMPONENTS.find((c) => c.id === id)?.name || id.replace(/-/g, " ")).join(", ")}</strong>.
+              Relays/drivers were also added for high-power actuators.
+            </div>
+            <button onClick={() => setAutoAddedActuators([])} className="ml-auto text-blue-400 hover:text-blue-600 shrink-0">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="px-6 pt-4 pb-2 shrink-0">
+          <h1 className="text-xl font-bold text-[#0f172a]">{project.analysis?.title || project.title}</h1>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 pb-8">
+          {stage === "idea" && renderIdeaStep()}
+          {stage === "analyzed" && renderAnalysisStep()}
+          {stage === "components" && renderComponentsStep()}
+          {stage === "wiring" && renderWiringStep()}
+          {stage === "code" && renderCodeStep()}
+        </div>
+      </div>
+
+      {/* Mobile tutor button (floating, only on < lg) */}
+      <button
+        onClick={() => setTutorOpen(!tutorOpen)}
+        aria-label={tutorOpen ? "Close AI Tutor" : "Open AI Tutor"}
+        className="lg:hidden fixed bottom-6 left-6 z-50 w-14 h-14 rounded-full bg-[#ec4899] text-white flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transition border border-[#e2e8f0]"
+      >
+        {tutorOpen ? <X className="w-5 h-5" /> : <MessageCircle className="w-6 h-6" />}
+      </button>
+
+      {/* Mobile tutor panel (floating, only on < lg) */}
+      <div
+        className={`lg:hidden fixed bottom-24 left-6 z-40 w-[380px] max-w-[calc(100vw-24px)] h-[520px] bg-white rounded-2xl shadow-xl border border-[#e2e8f0] flex flex-col transition-all duration-300 ${
+          tutorOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"
+        }`}
+      >
+        {tutorSidebar}
       </div>
     </div>
   );
@@ -1525,6 +1795,7 @@ function NewProjectForm({ onCreate }: { onCreate: (p: SandboxProject) => void })
       });
       if (!res.ok) throw new Error("Failed to create");
       const { project } = await res.json();
+      saveLocalProject(project);
       onCreate(project);
     } catch {
       setError("Failed to create project");

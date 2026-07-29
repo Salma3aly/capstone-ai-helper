@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useState, useEffect, useMemo } from 'react';
-import { getLocalProjects } from '@/lib/sandbox/store';
+import { getLocalProjects, listProjects, saveLocalProject } from '@/lib/sandbox/store';
 import type { SandboxProject, SandboxStage } from '@/lib/sandbox/types';
 import { Folder, Wrench, BookOpen, Trophy, ArrowRight, Clock, Sparkles, Beaker, Search, BookCopy, Users, Lightbulb, Rocket } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
@@ -65,8 +65,21 @@ export default function DashboardPage() {
       const u = localStorage.getItem('capstone_user');
       if (u) setUserName(JSON.parse(u).name || '');
     } catch {}
-    setProjects(getLocalProjects());
-    setLoading(false);
+
+    const local = getLocalProjects();
+    if (local.length > 0) {
+      setProjects(local);
+      setLoading(false);
+    } else {
+      // Fallback: fetch from API and seed localStorage
+      listProjects()
+        .then((apiProjects) => {
+          setProjects(apiProjects);
+          apiProjects.forEach(saveLocalProject);
+        })
+        .catch(() => { /* offline, just show empty */ })
+        .finally(() => setLoading(false));
+    }
   }, []);
 
   const projectCount = projects.length;
@@ -89,11 +102,13 @@ export default function DashboardPage() {
       <div className="max-w-5xl mx-auto space-y-8 flex-1 flex flex-col">
 
         {/* ── Header ── */}
-        <div>
+        <div className="fade-up">
           <h1 className="text-xl font-bold text-[#0f172a]">
-            {hasProjects
-              ? (userName ? `Welcome back, ${userName.split(' ')[0]}` : 'Welcome back')
-              : 'Welcome to Capstone'}
+            {hasProjects ? (
+              userName ? <>Welcome back, <span className="gradient-text-pink-purple">{userName.split(' ')[0]}</span></> : 'Welcome back'
+            ) : (
+              <>Welcome to <span className="gradient-text-pink-purple">Capstone</span></>
+            )}
           </h1>
           <p className="text-sm text-[#64748b] mt-1">
             {hasProjects
@@ -110,8 +125,8 @@ export default function DashboardPage() {
             {statCards.map((stat, i) => (
               <div
                 key={stat.label}
-                className="animate-card bg-white border border-[#e2e8f0] rounded-lg p-4 interactive"
-                style={{ cursor: 'default' }}
+                className="stat-card animate-card bg-white border border-[#e2e8f0] rounded-lg p-4"
+                style={{ animationDelay: `${i * 80}ms` }}
               >
                 <div className="flex items-center gap-3">
                   <div
@@ -136,27 +151,20 @@ export default function DashboardPage() {
         <div className="grid sm:grid-cols-2 gap-4">
           <Link
             href="/sandbox/new"
-            className="animate-card rounded-lg p-5 text-white"
+            className="animate-card rounded-lg p-5 text-white relative overflow-hidden"
             style={{
               background: 'linear-gradient(135deg, #f9a8d4, #ec4899)',
               animationDelay: '0.08s',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.015)';
-              e.currentTarget.style.boxShadow = '0 6px 20px rgba(236,72,153,0.35)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
           >
-            <Sparkles className="w-7 h-7 mb-3 opacity-90" />
-            <h3 className="font-bold">Start New Project</h3>
-            <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>Get AI recommendations for your next build.</p>
+            <div className="absolute inset-0 blueprint-grid opacity-20" />
+            <Sparkles className="w-7 h-7 mb-3 opacity-90 relative z-10" />
+            <h3 className="font-bold relative z-10">Start New Project</h3>
+            <p className="text-sm mt-1 relative z-10" style={{ color: 'rgba(255,255,255,0.7)' }}>Get AI recommendations for your next build.</p>
           </Link>
 
           {(firstInProgress ? (
-            <Link href={`/sandbox/${firstInProgress.id}`} className="animate-card bg-white border border-[#e2e8f0] rounded-lg p-5 interactive" style={{ animationDelay: '0.16s' }}>
+            <Link href={`/sandbox/${firstInProgress.id}`} className="tool-card animate-card bg-white border border-[#e2e8f0] rounded-lg p-5" style={{ animationDelay: '0.16s' }}>
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-[#f8fafc] flex items-center justify-center shrink-0">
                   <Clock className="w-4 h-4 text-[#64748b]" />
@@ -176,7 +184,7 @@ export default function DashboardPage() {
               </div>
             </Link>
           ) : hasProjects ? (
-            <Link href="/projects" className="animate-card bg-white border border-[#e2e8f0] rounded-lg p-5 interactive" style={{ animationDelay: '0.16s' }}>
+            <Link href="/projects" className="tool-card animate-card bg-white border border-[#e2e8f0] rounded-lg p-5" style={{ animationDelay: '0.16s' }}>
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-[#f8fafc] flex items-center justify-center shrink-0">
                   <Folder className="w-4 h-4 text-[#64748b]" />
@@ -188,7 +196,7 @@ export default function DashboardPage() {
               </div>
             </Link>
           ) : (
-            <Link href="/examples" className="animate-card bg-white border border-[#e2e8f0] rounded-lg p-5 interactive" style={{ animationDelay: '0.16s' }}>
+            <Link href="/examples" className="tool-card animate-card bg-white border border-[#e2e8f0] rounded-lg p-5" style={{ animationDelay: '0.16s' }}>
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-[#f8fafc] flex items-center justify-center shrink-0">
                   <Sparkles className="w-4 h-4 text-[#ec4899]" />
@@ -204,7 +212,7 @@ export default function DashboardPage() {
 
         {/* ── Recent Projects ── */}
         {recentProjects.length > 0 && (
-          <div>
+          <div className="fade-up">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-[#0f172a]">Recent Projects</h2>
               <Link href="/projects" className="text-xs text-[#ec4899] hover:text-[#db2777] transition">
@@ -213,7 +221,7 @@ export default function DashboardPage() {
             </div>
             <div className="grid sm:grid-cols-3 gap-4">
               {recentProjects.map((p) => (
-                <Link key={p.id} href={`/sandbox/${p.id}`} className="animate-card bg-white border border-[#e2e8f0] rounded-lg p-4 interactive">
+                <Link key={p.id} href={`/sandbox/${p.id}`} className="tool-card animate-card bg-white border border-[#e2e8f0] rounded-lg p-4">
                   <p className="text-sm font-semibold text-[#0f172a] truncate">{p.title || p.rawIdea}</p>
                   <p className="text-xs text-[#64748b] mt-1">
                     {p.stage === 'code' ? 'Code ready' : `Step ${stageIndex(p.stage) + 1}/5 · ${STAGE_LABELS[p.stage]}`}
@@ -231,7 +239,7 @@ export default function DashboardPage() {
         )}
 
         {/* ── Tools Grid ── */}
-        <div>
+        <div className="fade-up">
           <h2 className="text-sm font-semibold text-[#0f172a] mb-3">All Tools</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {tools.map((tool, i) => {
@@ -240,7 +248,7 @@ export default function DashboardPage() {
                 <Link
                   key={tool.id}
                   href={tool.href}
-                  className="animate-card bg-white border border-[#e2e8f0] rounded-lg p-4 interactive"
+                  className="tool-card animate-card bg-white border border-[#e2e8f0] rounded-lg p-4"
                   style={{ backgroundColor: `${tool.color}0a`, animationDelay: `${i * 60}ms` }}
                 >
                   <div className="flex items-center gap-2.5 mb-2">

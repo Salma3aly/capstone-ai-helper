@@ -60,12 +60,14 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-tr from-slate-50 via-white to-pink-50/20 p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden hero-mesh">
+      <div className="absolute inset-0 blueprint-grid opacity-30" />
       {/* Background glowing mesh orbs */}
-      <div className="glow-orb bg-[#ec4899] w-[400px] h-[400px] -top-32 -left-32 animate-pulse duration-[7000ms]" />
-      <div className="glow-orb bg-[#a855f7] w-[450px] h-[450px] -bottom-32 -right-32 animate-pulse duration-[9000ms]" />
+      <div className="glow-orb bg-[#ec4899] w-[400px] h-[400px] -top-32 -left-32 orb-animate" />
+      <div className="glow-orb bg-[#a855f7] w-[450px] h-[450px] -bottom-32 -right-32 orb-animate-2" />
+      <div className="glow-orb bg-[#3b82f6] w-[300px] h-[300px] top-1/3 right-1/4 orb-animate-3" />
 
-      <div className="w-full max-w-md relative z-10">
+      <div className="w-full max-w-md relative z-10 fade-up">
         <div className="glass-card rounded-2xl p-8 border border-white/60 shadow-2xl">
           <div className="text-center mb-8 flex flex-col items-center">
             <Logo size={48} textSize="text-2xl" />
@@ -261,9 +263,17 @@ export default function AuthPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-[#ec4899] hover:bg-[#db2777] transition disabled:opacity-50 shadow-sm"
+              className="shimmer-btn w-full py-2.5 rounded-lg text-sm font-bold text-white disabled:opacity-60"
             >
-              {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Please wait...
+                </span>
+              ) : mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
 

@@ -20,6 +20,7 @@ Rules:
 - Implement logic directly related to the student's idea — not generic boilerplate
 - Add inline comments on every meaningful line explaining what it does
 - Make the code copy-paste ready with no placeholders
+- **WIRING CRITICAL: The "connections" array for each component must use REAL pin numbers — e.g. "Data → 2" or "Trig → 9" — NOT placeholder strings like "PIN", "TODO", or variable names like "DHT22_PIN". Every signal connection (not VCC/GND) must reference a hardcoded numeric pin or an alphanumeric designation like "A0", "D2", "GP2". Failure to do this will cause code generation to fail.**
 - **For every actuator in the wiring** (relay, pump, motor, solenoid, valve, buzzer, LED, servo, fan, heater, lock, etc.) you MUST include real control logic: digitalWrite() to turn it on/off or analogWrite() for PWM, based on sensor readings. Do NOT only calculate a value and log it — actually drive the actuator pin.
 - If the project involves "automated watering" or "irrigation", the code must actually turn the water pump ON (digitalWrite(HIGH)) when soil is dry and OFF (digitalWrite(LOW)) when wet — not just calculate a water amount value and print it.
 

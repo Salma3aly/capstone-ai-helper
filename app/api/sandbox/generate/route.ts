@@ -4,7 +4,7 @@ import { grokChatJSON } from "@/lib/sandbox/grok";
 import { COMPONENTS, BOARD_COMPONENTS } from "@/lib/sandbox/components";
 import { validateBuild } from "@/lib/sandbox/validate";
 import { findMissingControlLogic, findCoreFeaturesMissingActuators, findActuatorNodesMissingFromHardware } from "@/lib/sandbox/actuators";
-import { enforceDriverWiring, correctPinsInCode, validatePins, checkPinMismatch, checkDriverPresence, fixPowerWiring, removeUnusedConstants, checkPlaceholderPins } from "@/lib/sandbox/pins";
+import { enforceDriverWiring, correctPinsInCode, validatePins, checkPinMismatch, checkDriverPresence, fixPowerWiring, removeUnusedConstants, checkPlaceholderPins, assignDefaultWiringPins } from "@/lib/sandbox/pins";
 import type { GenerateResponse, ValidationIssue } from "@/lib/sandbox/types";
 
 function detectLanguage(board: string): string {
@@ -73,6 +73,8 @@ export async function POST(req: Request) {
       data.wiring = enforceDriverWiring(data.wiring);
       // Fix power wiring: prevent VCC/GND mapped to numbered GPIO pins
       data.wiring = fixPowerWiring(data.wiring);
+      // Replace placeholder pin references (PIN, TODO, X, constant names) with real pin numbers
+      data.wiring = assignDefaultWiringPins(data.wiring);
       // Driver presence self-check — hard block if any actuator lacks a driver
       const driverErrors = checkDriverPresence(data.wiring);
       if (driverErrors.length > 0) {

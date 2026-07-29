@@ -168,9 +168,14 @@ export function findAndReplacePinInCode(
 
 /**
  * Automated correction process to ensure code matches wiring.
+ * First pass: match by wiring component name → expected pin.
+ * Second pass: any remaining = PIN / TODO / X placeholders get auto-assigned
+ * the next available digital pin.
  */
 export function correctPinsInCode(wiring: WiringItem[], code: string): string {
   let correctedCode = code;
+
+  // Pass 1: match via wiring data
   wiring.forEach((item) => {
     const pins: string[] = [];
     item.connections.forEach((conn) => {
@@ -189,7 +194,39 @@ export function correctPinsInCode(wiring: WiringItem[], code: string): string {
       });
     }
   });
+
+  // Pass 2: auto-assign for any remaining placeholder values
+  correctedCode = assignDefaultPins(correctedCode);
+
   return correctedCode;
+}
+
+/**
+ * Replaces any remaining placeholder values (PIN, TODO, X, etc.) in
+ * pin constant declarations with auto-assigned pin numbers.
+ * Scans existing pins in code to pick the next available number.
+ */
+export function assignDefaultPins(code: string): string {
+  // Find all existing pin numbers used in declarations
+  const existingPins = new Set<number>();
+  const existingRegex = /(?:#define\s+\w+\s+|(?:const\s+)?(?:int|byte|uint8_t)\s+\w+\s*=\s*)(\d+)/gi;
+  let existingMatch;
+  while ((existingMatch = existingRegex.exec(code)) !== null) {
+    existingPins.add(parseInt(existingMatch[1], 10));
+  }
+
+  let nextPin = 2;
+  const usedInThisPass = new Set<string>();
+
+  // Use .replace() with a callback for safe single-pass replacement
+  const placeholderRegex = /((?:#define\s+\w+\s+|(?:const\s+)?(?:int|byte|uint8_t)\s+\w+\s*=\s*))(PIN|TODO|X|undefined|null|PLACEHOLDER|VALUE)(\s*;?)/gi;
+  return code.replace(placeholderRegex, (_match, prefix, _placeholder, suffix) => {
+    while (existingPins.has(nextPin) || usedInThisPass.has(String(nextPin))) {
+      nextPin++;
+    }
+    usedInThisPass.add(String(nextPin));
+    return prefix + nextPin + (suffix || "");
+  });
 }
 
 /**
@@ -431,6 +468,64 @@ export function checkPlaceholderPins(code: string): string[] {
     errors.push(`Placeholder value "${m[1]}" found in declaration: "${decl}". Must be a real pin number.`);
   }
   return errors;
+}
+
+/**
+ * Post-process wiring to replace placeholder pin references (PIN, TODO, X, etc.)
+ * on the RHS of connection strings with real sequential pin numbers.
+ * This prevents the LLM from outputting abstract placeholders like "Data → PIN".
+ */
+export function assignDefaultWiringPins(wiring: WiringItem[]): WiringItem[] {
+  const arrow = /(?:→|->)\s*/;
+  // Match RHS that is a known placeholder literal
+  const placeholderLiteral = /(?:→|->)\s*(PIN|TODO|X|PLACEHOLDER|VALUE|undefined|null)\s*$/i;
+  // Match RHS that looks like a code constant name (3+ uppercase chars, e.g. DHT22_PIN, SOIL_MOISTURE)
+  const constantName = /(?:→|->)\s*([A-Z][A-Z0-9_]{2,})\s*$/;
+
+  // Collect already-assigned signal pin numbers to avoid duplicates
+  const usedPins = new Set<number>();
+  for (const item of wiring) {
+    for (const conn of item.connections) {
+      const p = extractPinFromConnection(conn);
+      if (p && /^\d+$/.test(p)) usedPins.add(parseInt(p, 10));
+    }
+  }
+  let nextPin = 2;
+  const nextAvail = (): string => {
+    while (usedPins.has(nextPin)) nextPin++;
+    usedPins.add(nextPin);
+    const n = nextPin;
+    nextPin++;
+    return String(n);
+  };
+
+  const isPowerOrGround = (s: string) => /^(VCC|GND|5V|3V|3\.3V|VIN)$/i.test(s);
+  const isPinDesignation = (s: string) => /^\d+$/.test(s) || /^[AD]\d+$/i.test(s) || /^GP\d+$/i.test(s);
+
+  return wiring.map((item) => ({
+    ...item,
+    connections: item.connections.map((conn) => {
+      // 1) Replace literal placeholders: "→ PIN", "→ TODO", etc.
+      if (placeholderLiteral.test(conn)) {
+        const newPin = nextAvail();
+        return conn.replace(placeholderLiteral, `→ ${newPin}`);
+      }
+      // 2) Replace constant-name RHS: "→ DHT22_PIN", "→ MOISTURE_SENSOR", etc.
+      const parts = conn.split(/→|->/);
+      if (parts.length >= 2) {
+        const rhs = parts[parts.length - 1].trim();
+        if (
+          constantName.test(conn) &&
+          !isPowerOrGround(rhs) &&
+          !isPinDesignation(rhs)
+        ) {
+          const newPin = nextAvail();
+          return conn.replace(constantName, `→ ${newPin}`);
+        }
+      }
+      return conn;
+    }),
+  }));
 }
 
 /**
