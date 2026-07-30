@@ -1,10 +1,10 @@
-import Link from 'next/link';
+import { Link } from 'wouter';
 
 interface CardProps {
   children: React.ReactNode;
   className?: string;
   hover?: boolean;
-  as?: 'div' | 'a' | typeof Link;
+  as?: 'div' | 'a' | 'link';
   href?: string;
   onClick?: () => void;
 }
@@ -17,7 +17,7 @@ export function Card({ children, className = '', hover = true, as: Tag = 'div', 
   if (Tag === 'a' && href) {
     return <a href={href} className={cls} onClick={onClick}>{children}</a>;
   }
-  if (Tag === Link && href) {
+  if (Tag === 'link' && href) {
     return <Link href={href} className={cls} onClick={onClick}>{children}</Link>;
   }
   return <div className={cls} onClick={onClick}>{children}</div>;

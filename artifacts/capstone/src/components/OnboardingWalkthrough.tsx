@@ -1,6 +1,5 @@
-'use client';
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { Link } from 'wouter';
 import { Sparkles, Cpu, Rocket, ArrowRight, ArrowLeft, X, CheckCircle } from 'lucide-react';
 
 const STORAGE_KEY = 'capstone-onboarded';

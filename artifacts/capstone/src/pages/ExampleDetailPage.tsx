@@ -1,6 +1,5 @@
 import { useLocation, useParams } from 'wouter';
 import { useState } from 'react';
-import { useParams } from 'next/navigation';
 import { Link } from 'wouter';
 import { ArrowLeft, Cpu, Wifi, Code, Table, AlertTriangle } from 'lucide-react';
 import { EXAMPLES } from '@/lib/examples/data';
