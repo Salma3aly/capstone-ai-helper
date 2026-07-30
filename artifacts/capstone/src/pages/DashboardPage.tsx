@@ -63,38 +63,42 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto page-enter">
+    <div className="p-6 max-w-6xl mx-auto page-enter relative">
+      {/* Background gradient mesh */}
+      <div className="glow-orb mesh-orb-1 bg-pink-300 w-[400px] h-[400px] -top-20 -right-20 opacity-8 pointer-events-none fixed" />
+      <div className="glow-orb mesh-orb-2 bg-purple-300 w-[350px] h-[350px] top-1/3 -left-20 opacity-8 pointer-events-none fixed" />
+      
       {/* Greeting */}
-      <div className="mb-8">
-        <h2 className="text-3xl font-black text-[#0f172a] mb-1">
-          {greeting}, <span className="animate-gradient-text">{firstName}</span> 👋
+      <div className="mb-8 relative z-10">
+        <h2 className="text-4xl font-black text-[#0f172a] mb-2 tracking-tight">
+          {greeting}, <span className="animate-gradient-text">{firstName}</span>
         </h2>
-        <p className="text-gray-500">What are we building today?</p>
+        <p className="text-gray-600 font-medium">What are we building today?</p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-10 relative z-10">
         {stats.map((s, i) => (
-          <div key={i} className={`animate-card hover-glow-card glass-card rounded-2xl p-4 border border-gray-100`}>
-            <div className={`w-9 h-9 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-3 animate-stat-icon`}>{s.icon}</div>
-            <p className={`text-2xl font-black ${s.color} mb-0.5`}>{s.value}</p>
-            <p className="text-xs text-gray-400 font-medium">{s.label}</p>
+          <div key={i} className={`animate-card hover-glow-card glass-card rounded-3xl p-5 border border-white/60 shadow-sm hover:shadow-lg transition-all duration-300`}>
+            <div className={`w-11 h-11 rounded-2xl ${s.bg} ${s.color} flex items-center justify-center mb-4 animate-stat-icon shadow-sm`}>{s.icon}</div>
+            <p className={`text-3xl font-black ${s.color} mb-1 tracking-tight`}>{s.value}</p>
+            <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">{s.label}</p>
           </div>
         ))}
       </div>
 
       {/* Quick Actions */}
-      <div className="mb-8">
-        <h3 className="text-lg font-black text-[#0f172a] mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="mb-10 relative z-10">
+        <h3 className="text-xl font-black text-[#0f172a] mb-5 tracking-tight">Quick Actions</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
           {TOOLS.map((tool, i) => (
             <Link key={tool.id} href={tool.href}
-              className={`animate-card hover-glow-card glass-card rounded-2xl p-5 border border-gray-100 cursor-pointer group`}>
-              <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${tool.gradient} shadow-lg ${tool.shadow} flex items-center justify-center text-white mb-3 group-hover:scale-110 transition-transform`}>
+              className={`animate-card hover-glow-card glass-card rounded-3xl p-6 border border-white/60 cursor-pointer group shadow-sm hover:shadow-xl transition-all duration-300`}>
+              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${tool.gradient} shadow-lg ${tool.shadow} flex items-center justify-center text-white mb-4 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300`}>
                 {tool.icon}
               </div>
-              <p className="font-black text-sm text-[#0f172a] mb-0.5">{tool.label}</p>
-              <p className="text-xs text-gray-400">{tool.desc}</p>
+              <p className="font-black text-sm text-[#0f172a] mb-1">{tool.label}</p>
+              <p className="text-xs text-gray-500 leading-relaxed">{tool.desc}</p>
             </Link>
           ))}
         </div>
@@ -102,27 +106,27 @@ export default function DashboardPage() {
 
       {/* Recent Activity */}
       {sandboxProjects.length > 0 && (
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-black text-[#0f172a]">Recent Sandbox Projects</h3>
-            <Link href="/projects" className="text-sm text-[#ec4899] font-semibold hover:underline flex items-center gap-1">
+        <div className="mb-10 relative z-10">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-xl font-black text-[#0f172a] tracking-tight">Recent Sandbox Projects</h3>
+            <Link href="/projects" className="pill-badge bg-pink-50 border-pink-200 text-pink-700 hover:scale-105">
               View all <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {sandboxProjects.map((p, i) => (
               <Link key={p.id} href={`/sandbox/${p.id}`}
-                className="animate-card flex items-center justify-between p-4 glass-card hover-glow-card rounded-xl border border-gray-100 cursor-pointer">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center text-white shrink-0">
-                    <Cpu className="w-4 h-4" />
+                className="animate-card flex items-center justify-between p-5 glass-card hover-glow-card rounded-2xl border border-white/60 cursor-pointer shadow-sm">
+                <div className="flex items-center gap-4">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center text-white shrink-0 shadow-md">
+                    <Cpu className="w-5 h-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-[#0f172a] truncate max-w-[200px]">{p.title}</p>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STAGE_COLORS[p.stage] || 'bg-gray-100 text-gray-500'}`}>{p.stage}</span>
+                    <p className="text-sm font-black text-[#0f172a] truncate max-w-[220px] mb-1">{p.title}</p>
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${STAGE_COLORS[p.stage] || 'bg-gray-100 text-gray-500'}`}>{p.stage}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
                   <Clock className="w-3.5 h-3.5" /> {timeAgo(p.updatedAt)}
                 </div>
               </Link>
@@ -133,12 +137,14 @@ export default function DashboardPage() {
 
       {/* Empty state if no projects */}
       {sandboxProjects.length === 0 && (
-        <div className="glass-card rounded-2xl border border-dashed border-gray-200 p-10 text-center animate-float">
-          <Sparkles className="w-10 h-10 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-black text-[#0f172a] mb-2">No projects yet</h3>
-          <p className="text-sm text-gray-400 mb-6 max-w-xs mx-auto">Start your first capstone project. Pick any tool above to begin.</p>
-          <Link href="/sandbox" className="inline-flex items-center gap-2 bg-gradient-to-r from-[#ec4899] to-[#a855f7] text-white font-bold text-sm px-6 py-3 rounded-xl hover:shadow-md transition">
-            Try the Sandbox <ArrowRight className="w-4 h-4" />
+        <div className="glass-card rounded-3xl border-2 border-dashed border-gray-200 p-12 text-center animate-float relative z-10 shadow-sm">
+          <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center mx-auto mb-6">
+            <Sparkles className="w-10 h-10 text-pink-400" />
+          </div>
+          <h3 className="text-2xl font-black text-[#0f172a] mb-3 tracking-tight">No projects yet</h3>
+          <p className="text-sm text-gray-600 mb-8 max-w-xs mx-auto leading-relaxed">Start your first capstone project. Pick any tool above to begin building something amazing.</p>
+          <Link href="/sandbox" className="inline-flex items-center gap-2.5 bg-gradient-to-r from-[#ec4899] to-[#a855f7] text-white font-black text-base px-8 py-4 rounded-2xl hover:shadow-xl hover:scale-105 transition-all duration-300 shadow-lg shadow-pink-200/50">
+            Try the Sandbox <ArrowRight className="w-5 h-5" />
           </Link>
         </div>
       )}
