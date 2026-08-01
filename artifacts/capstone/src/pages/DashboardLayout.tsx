@@ -59,29 +59,29 @@ function ProfileMenu() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="w-8 h-8 rounded-full bg-[#ec4899] text-white text-sm font-bold flex items-center justify-center hover:shadow-md hover:scale-105 transition shadow-sm overflow-hidden"
+        className="w-9 h-9 rounded-full bg-gradient-to-br from-[#ec4899] to-[#a855f7] text-white text-sm font-black flex items-center justify-center hover:shadow-lg hover:scale-110 transition-all duration-200 shadow-md overflow-hidden border-2 border-white"
         aria-label="Profile menu"
       >
         {avatar ? <img src={avatar} alt="" className="w-full h-full object-cover" /> : initial}
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-[#e2e8f0] rounded-xl shadow-lg py-2 z-50">
-          <div className="px-4 py-2 border-b border-[#e2e8f0]">
-            <p className="text-sm font-semibold text-[#0f172a] truncate">{user?.name || 'User'}</p>
-            <p className="text-xs text-[#64748b] truncate">{user?.email || ''}</p>
+        <div className="absolute right-0 top-full mt-3 w-60 glass-card border border-white/70 rounded-2xl shadow-2xl py-2 z-50">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-black text-gray-900 truncate">{user?.name || 'User'}</p>
+            <p className="text-xs text-gray-500 truncate mt-0.5">{user?.email || ''}</p>
           </div>
-          <div className="py-1">
+          <div className="py-2">
             <Link href="/projects" onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-[#0f172a] hover:bg-[#f8fafc] transition">
-              <Folder className="w-4 h-4 text-[#64748b]" /> My Projects
+              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gradient-to-r hover:from-pink-50 hover:to-purple-50/50 hover:text-pink-600 transition-all rounded-lg mx-1">
+              <Folder className="w-4 h-4" /> My Projects
             </Link>
             <Link href="/settings" onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-[#0f172a] hover:bg-[#f8fafc] transition">
-              <Settings className="w-4 h-4 text-[#64748b]" /> Settings
+              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gradient-to-r hover:from-pink-50 hover:to-purple-50/50 hover:text-pink-600 transition-all rounded-lg mx-1">
+              <Settings className="w-4 h-4" /> Settings
             </Link>
-            <hr className="my-1 border-[#e2e8f0]" />
+            <hr className="my-2 border-gray-100" />
             <button onClick={() => { signOut(); setOpen(false); }}
-              className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition">
+              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 transition-all rounded-lg mx-1">
               <LogOut className="w-4 h-4" /> Sign Out
             </button>
           </div>
@@ -98,22 +98,24 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
 
   return (
     <>
-      {sidebarOpen && <div className="fixed inset-0 bg-black/20 z-20 md:hidden" onClick={onClose} />}
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-60 bg-white border-r border-[#e2e8f0] flex flex-col overflow-hidden shrink-0 transition-transform duration-200`}>
-        <div className="p-4 border-b border-[#e2e8f0] flex items-center justify-between">
-          <Link href="/" className="hover:opacity-80 transition">
-            <Logo size={32} textSize="text-lg" />
-            <p className="text-[10px] text-[#64748b] mt-0.5 ml-0.5">Project Hub</p>
+      {sidebarOpen && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-20 md:hidden" onClick={onClose} />}
+      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static inset-y-0 left-0 z-30 w-64 bg-gradient-to-b from-white to-slate-50/50 border-r border-white/80 flex flex-col overflow-hidden shrink-0 transition-transform duration-300 shadow-xl md:shadow-none`}>
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-white/80 backdrop-blur-sm">
+          <Link href="/" className="hover:opacity-90 transition-opacity">
+            <Logo size={36} textSize="text-xl" />
+            <p className="text-[10px] text-gray-500 mt-1 ml-0.5 font-semibold tracking-wider uppercase">Project Hub</p>
           </Link>
-          <button onClick={onClose} className="md:hidden p-1 text-[#64748b] hover:text-[#0f172a]"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} className="md:hidden p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"><X className="w-4 h-4" /></button>
         </div>
-        <nav className="flex-1 py-2 px-2 space-y-1 overflow-y-auto">
+        <nav className="flex-1 py-3 px-3 space-y-1.5 overflow-y-auto">
           {features.map((f) => {
             const isActive = pathname === f.href || pathname.startsWith(f.href + '/');
             return (
               <Link key={f.id} href={f.href} onClick={onClose}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
-                  isActive ? 'bg-[#fdf2f8] text-[#ec4899] font-semibold' : 'text-[#64748b] hover:bg-[#fdf2f8] hover:text-[#ec4899]'
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                  isActive 
+                    ? 'bg-gradient-to-r from-pink-50 to-purple-50 text-[#ec4899] border border-pink-100 shadow-sm' 
+                    : 'text-gray-600 hover:bg-gradient-to-r hover:from-pink-50/50 hover:to-purple-50/50 hover:text-[#ec4899] border border-transparent'
                 }`}>
                 <span className="shrink-0">{NAV_ICONS[f.id]}</span>
                 <span className="truncate">{f.label}</span>
@@ -121,26 +123,26 @@ function Sidebar({ children, sidebarOpen, onClose }: { children: React.ReactNode
             );
           })}
         </nav>
-        <div className="p-3 border-t border-[#e2e8f0]">
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-[#64748b]">
-            <div className="w-5 h-5 rounded-full bg-[#ec4899] text-white text-[9px] font-bold flex items-center justify-center shrink-0">
+        <div className="p-4 border-t border-gray-100 bg-white/80 backdrop-blur-sm">
+          <div className="flex items-center gap-3 px-3 py-2.5 text-xs text-gray-700 bg-gradient-to-r from-slate-50 to-purple-50/30 rounded-xl border border-gray-100">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#ec4899] to-[#a855f7] text-white text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm">
               {(user?.name?.charAt(0) || '?').toUpperCase()}
             </div>
-            <span className="truncate">{user?.name || 'User'}</span>
+            <span className="truncate font-semibold">{user?.name || 'User'}</span>
           </div>
         </div>
       </aside>
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center justify-between px-4 py-3 border-b border-[#e2e8f0] bg-white">
+        <header className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-white/80 backdrop-blur-sm shadow-sm">
           <div className="flex items-center gap-3">
-            <button onClick={onClose} className="md:hidden p-1.5 rounded-lg text-[#64748b] hover:bg-[#f8fafc] transition">
+            <button onClick={onClose} className="md:hidden p-2 rounded-xl text-gray-500 hover:bg-pink-50 hover:text-pink-600 transition">
               <Menu className="w-5 h-5" />
             </button>
-            <h1 className="text-lg font-bold text-[#0f172a]">{pageTitle}</h1>
+            <h1 className="text-xl font-black text-[#0f172a] tracking-tight">{pageTitle}</h1>
           </div>
           <ProfileMenu />
         </header>
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50/30 to-pink-50/10">{children}</div>
       </div>
     </>
   );
