@@ -27,7 +27,9 @@ interface PresenceUser {
   online: boolean;
 }
 
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3002";
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const DEFAULT_CHANNELS: Channel[] = [
   { id: "general", name: "general", description: "General capstone discussions" },
   { id: "electronics-help", name: "electronics-help", description: "Troubleshoot sensors, wiring & code" },
@@ -79,7 +81,8 @@ export default function HubPage() {
         ws.onopen = () => {
           // Send join info
           if (user) {
-            ws?.send(JSON.stringify({ type: "join", userName: user.name, userEmail: user.email }));
+            const token = localStorage.getItem("capstone_token") || "";
+            ws?.send(JSON.stringify({ type: "identify", name: user.name, email: user.email, token }));
           }
         };
 
@@ -120,7 +123,8 @@ export default function HubPage() {
   // Refresh presence when user changes
   useEffect(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && user) {
-      wsRef.current.send(JSON.stringify({ type: "join", userName: user.name, userEmail: user.email }));
+      const token = localStorage.getItem("capstone_token") || "";
+      wsRef.current.send(JSON.stringify({ type: "identify", name: user.name, email: user.email, token }));
     }
   }, [user]);
 

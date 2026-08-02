@@ -8,23 +8,23 @@ import type { WiringItem } from "./types";
 export function extractPinFromConnection(connString: string): string | null {
   const parts = connString.split(/→|->/);
   if (parts.length < 2) return null;
-  const rhs = parts[1].trim();
+  let rhs = parts[1].trim();
 
   // Skip power and ground connections
   if (/\b(vcc|gnd|5v|3\.3v|3v3|vin)\b/i.test(rhs)) return null;
 
-  // Match: Pin 9, D3, A0, GP2, 9
-  const match = rhs.match(/\b(?:pin|d|a|gp)?([a-z0-9]+)\b/i);
-  if (match) {
-    const pin = match[1].toUpperCase();
-    if (/^[A-Z0-9]+$/.test(pin)) {
-      // If it matches D3, keep "3" since digital pins in code are typically bare numbers
-      if (rhs.toUpperCase().includes("D" + pin) && !isNaN(Number(pin))) {
-        return pin;
-      }
-      return pin;
-    }
-  }
+  // Skip driver-module terminals — these aren't microcontroller pins. After
+  // enforceDriverWiring, actuators route "+ → Relay NO" / "→ MOSFET OUT",
+  // which must not be treated as pin numbers.
+  if (/\b(relay|mosfet|driver|l298|nema|stepper|h-bridge|bridge)\b/i.test(rhs)) return null;
+
+  // Strip a leading "Pin 2" / "PIN 9" label so the number is captured.
+  rhs = rhs.replace(/^pin\s+/i, "");
+
+  // Match an MCU pin reference: "D2", "A0", "GP2", or a bare number like "9".
+  const match = rhs.match(/\b(?:D|A|GP|P)?([0-9]+)\b/i);
+  if (match) return match[1];
+
   return null;
 }
 
@@ -120,6 +120,41 @@ export function getPossibleConstantNames(componentName: string): string[] {
     names.add("SERVO_PIN");
     names.add("SERVO_SG90");
     names.add("SERVO_SG90_PIN");
+  }
+
+  // Camel-case idioms the model commonly emits (e.g. dhtPin, moisturePin,
+  // pumpPin, relayPin, trigPin). Without these, correctPinsInCode can't fix
+  // placeholders like `const int dhtPin = PIN;` and generation hard-blocks.
+  const cam = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+  names.add(cam(clean.replace(/_+/g, "")) + "Pin");
+  parts.forEach((p) => names.add(p.toLowerCase() + "Pin"));
+  if (clean.includes("DHT")) {
+    names.add("dhtPin");
+    names.add("dht22Pin");
+  }
+  if (clean.includes("MOISTURE")) {
+    names.add("moisturePin");
+    names.add("soilMoisturePin");
+  }
+  if (clean.includes("PUMP") || clean.includes("RELAY")) {
+    names.add("pumpPin");
+    names.add("waterPumpPin");
+    names.add("relayPin");
+    names.add("motorPin");
+  }
+  if (clean.includes("VALVE") || clean.includes("SOLENOID")) {
+    names.add("valvePin");
+    names.add("solenoidPin");
+  }
+  if (clean.includes("ULTRASONIC") || clean.includes("HC") || clean.includes("SR04")) {
+    names.add("trigPin");
+    names.add("echoPin");
+  }
+  if (clean.includes("LED")) {
+    names.add("ledPin");
+  }
+  if (clean.includes("BUZZER")) {
+    names.add("buzzerPin");
   }
 
   return Array.from(names);
@@ -350,13 +385,13 @@ export function enforceDriverWiring(wiring: WiringItem[]): WiringItem[] {
           } else {
             driverEntry!.connections.push(`IN → Pin ${mcPin}`);
           }
-
-          // Rewire actuator to route through the driver module
-          item.connections = [
-            `+ → ${driverComponent === "Relay Module" ? "Relay NO" : "MOSFET OUT"}`,
-            `- → External Power GND`,
-          ];
         }
+
+        // Rewire actuator to route through the driver module
+        item.connections = [
+          `+ → ${driverComponent === "Relay Module" ? "Relay NO" : "MOSFET OUT"}`,
+          `- → External Power GND`,
+        ];
       }
     });
   }
@@ -431,6 +466,63 @@ export function checkPlaceholderPins(code: string): string[] {
     errors.push(`Placeholder value "${m[1]}" found in declaration: "${decl}". Must be a real pin number.`);
   }
   return errors;
+}
+
+/**
+ * Replace placeholder pin references (PIN, TODO, X, constant names) in wiring
+ * connections with real, unique pin numbers.
+ */
+export function assignDefaultWiringPins(wiring: WiringItem[]): WiringItem[] {
+  const arrow = /(?:→|->)\s*/;
+  // Match RHS that is a known placeholder literal
+  const placeholderLiteral = /(?:→|->)\s*(PIN|TODO|X|PLACEHOLDER|VALUE|undefined|null)\s*$/i;
+  // Match RHS that looks like a code constant name (3+ uppercase chars, e.g. DHT22_PIN, SOIL_MOISTURE)
+  const constantName = /(?:→|->)\s*([A-Z][A-Z0-9_]{2,})\s*$/;
+
+  // Collect already-assigned signal pin numbers to avoid duplicates
+  const usedPins = new Set<number>();
+  for (const item of wiring) {
+    for (const conn of item.connections) {
+      const p = extractPinFromConnection(conn);
+      if (p && /^\d+$/.test(p)) usedPins.add(parseInt(p, 10));
+    }
+  }
+  let nextPin = 2;
+  const nextAvail = (): string => {
+    while (usedPins.has(nextPin)) nextPin++;
+    usedPins.add(nextPin);
+    const n = nextPin;
+    nextPin++;
+    return String(n);
+  };
+
+  const isPowerOrGround = (s: string) => /^(VCC|GND|5V|3V|3\.3V|VIN)$/i.test(s);
+  const isPinDesignation = (s: string) => /^\d+$/.test(s) || /^[AD]\d+$/i.test(s) || /^GP\d+$/i.test(s);
+
+  return wiring.map((item) => ({
+    ...item,
+    connections: item.connections.map((conn) => {
+      // 1) Replace literal placeholders: "→ PIN", "→ TODO", etc.
+      if (placeholderLiteral.test(conn)) {
+        const newPin = nextAvail();
+        return conn.replace(placeholderLiteral, `→ ${newPin}`);
+      }
+      // 2) Replace constant-name RHS: "→ DHT22_PIN", "→ MOISTURE_SENSOR", etc.
+      const parts = conn.split(/→|->/);
+      if (parts.length >= 2) {
+        const rhs = parts[parts.length - 1].trim();
+        if (
+          constantName.test(conn) &&
+          !isPowerOrGround(rhs) &&
+          !isPinDesignation(rhs)
+        ) {
+          const newPin = nextAvail();
+          return conn.replace(constantName, `→ ${newPin}`);
+        }
+      }
+      return conn;
+    }),
+  }));
 }
 
 /**

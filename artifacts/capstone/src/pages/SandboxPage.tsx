@@ -1,4 +1,4 @@
-import { useLocation, useParams } from 'wouter';
+import { useLocation } from 'wouter';
 
 import { useState } from "react";
 
@@ -13,6 +13,7 @@ const EXAMPLES = [
 ];
 
 export default function SandboxLanding() {
+  const [, navigate] = useLocation();
   const [idea, setIdea] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

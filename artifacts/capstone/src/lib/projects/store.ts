@@ -1,5 +1,6 @@
 'use client';
-import type { SavedProject } from '@/lib/sandbox/types';
+import type { SavedProject, SandboxProject } from '@/lib/sandbox/types';
+import { BOARD_COMPONENTS } from '@/lib/sandbox/components';
 
 const STORAGE_KEY = 'capstone-projects';
 
@@ -31,16 +32,48 @@ function saveLocal(projects: SavedProject[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }
 
+function detectLanguage(boardName: string): string {
+  const lower = boardName.toLowerCase();
+  if (lower.includes('rpi') && !lower.includes('pico')) return 'Python (RPi.GPIO)';
+  if (lower.includes('pico')) return 'MicroPython';
+  return 'Arduino C++';
+}
+
+// Map a server sandbox project into the legacy "My Projects" display shape.
+function toSavedProject(p: SandboxProject): SavedProject {
+  const boardComp = p.hardwareBoard ? BOARD_COMPONENTS.find((c) => c.id === p.hardwareBoard) : undefined;
+  const boardName = boardComp?.name || p.hardwareBoard || '';
+  return {
+    id: p.id,
+    idea: p.title || p.rawIdea,
+    board: boardName,
+    boardId: p.hardwareBoard || null,
+    sensors: (p.hardwareSensors || []).map((id) => p.sensorNames?.[id] || id),
+    sensorNames: p.sensorNames || {},
+    wiring: p.hardwareWiring || [],
+    code: p.code?.files?.map((f) => f.content).join('\n\n') || '',
+    language: boardName ? detectLanguage(boardName) : '',
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    status: p.stage === 'code' ? 'generated' : (p.stage === 'idea' ? 'idea' : 'components'),
+  };
+}
+
 let serverLoaded = false;
 
 export async function getProjectsAsync(): Promise<SavedProject[]> {
-  const res = await api('/projects');
+  const res = await api('/sandbox/projects');
   if (res && res.ok) {
     const data = await res.json();
     if (data.projects) {
-      saveLocal(data.projects);
+      const mapped = (data.projects as SandboxProject[]).map(toSavedProject);
+      const local = loadLocal();
+      const byId = new Map(local.map((p) => [p.id, p]));
+      mapped.forEach((p) => byId.set(p.id, p));
+      const merged = Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+      saveLocal(merged);
       serverLoaded = true;
-      return data.projects;
+      return merged;
     }
   }
   return loadLocal().sort((a, b) => b.updatedAt - a.updatedAt);
@@ -60,7 +93,7 @@ export async function createProjectAsync(data: Omit<SavedProject, 'id' | 'create
   const all = loadLocal();
   all.push(project);
   saveLocal(all);
-  api('/projects', { method: 'POST', body: JSON.stringify(project) });
+  api('/sandbox/projects', { method: 'POST', body: JSON.stringify(project) });
   return project;
 }
 
@@ -70,7 +103,7 @@ export function createProject(data: Omit<SavedProject, 'id' | 'createdAt' | 'upd
   const all = loadLocal();
   all.push(project);
   saveLocal(all);
-  api('/projects', { method: 'POST', body: JSON.stringify(project) });
+  api('/sandbox/projects', { method: 'POST', body: JSON.stringify(project) });
   return project;
 }
 
@@ -80,7 +113,7 @@ export async function updateProjectAsync(id: string, data: Partial<SavedProject>
   if (idx === -1) return;
   all[idx] = { ...all[idx], ...data, updatedAt: Date.now() };
   saveLocal(all);
-  api('/projects', { method: 'PUT', body: JSON.stringify({ id, ...data }) });
+  api('/sandbox/projects', { method: 'PUT', body: JSON.stringify({ id, ...data }) });
   return all[idx];
 }
 
@@ -90,20 +123,20 @@ export function updateProject(id: string, data: Partial<SavedProject>): SavedPro
   if (idx === -1) return;
   all[idx] = { ...all[idx], ...data, updatedAt: Date.now() };
   saveLocal(all);
-  api('/projects', { method: 'PUT', body: JSON.stringify({ id, ...data }) });
+  api('/sandbox/projects', { method: 'PUT', body: JSON.stringify({ id, ...data }) });
   return all[idx];
 }
 
 export async function deleteProjectAsync(id: string) {
   const all = loadLocal().filter((p) => p.id !== id);
   saveLocal(all);
-  api(`/projects?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  api(`/sandbox/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function deleteProject(id: string) {
   const all = loadLocal().filter((p) => p.id !== id);
   saveLocal(all);
-  api(`/projects?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  api(`/sandbox/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function getProjectsByStatus(status: SavedProject['status']): SavedProject[] {

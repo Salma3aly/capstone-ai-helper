@@ -1,7 +1,11 @@
 import { Router } from "express";
+import multer from "multer";
 import { grokChatJSON, grokChatStream } from "../lib/sandbox/grok.js";
+import { extractTextFromPdf } from "../lib/research/pdf-extract.js";
 import { readStore, writeStore } from "../lib/storage/db.js";
 import { verifyToken } from "./auth.js";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const router = Router();
 
@@ -55,10 +59,15 @@ router.post("/research/fetch-url", async (req, res) => {
   } catch (e) { return res.status(500).json({ error: e instanceof Error ? e.message : "Failed to fetch URL" }); }
 });
 
-router.post("/research/extract-pdf", async (req, res) => {
-  // PDF extraction handled via multer on a separate endpoint
-  // This stub returns an error directing to /citation/extract-pdf
-  return res.status(400).json({ error: "PDF upload not supported on this endpoint. Use /api/citation/extract-pdf" });
+router.post("/research/extract-pdf", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "PDF file required" });
+    const text = extractTextFromPdf(req.file.buffer);
+    if (!text || text.trim().length < 50) {
+      return res.status(422).json({ error: "Could not extract text from this PDF. It may be image-based (scanned) or encrypted." });
+    }
+    return res.json({ text: text.slice(0, 20000), source: "pdf" });
+  } catch (e) { return res.status(500).json({ error: e instanceof Error ? e.message : "Failed to extract PDF" }); }
 });
 
 router.post("/research/search", async (req, res) => {

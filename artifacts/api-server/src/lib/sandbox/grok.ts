@@ -316,7 +316,42 @@ export async function grokChatJSON<T>(messages: ChatMessage[], model = "llama-3.
     try {
       return JSON.parse(repaired) as T;
     } catch {
+      // Some models wrap the JSON in prose ("Based on the text, here is the JSON:").
+      // Fall back to extracting the first balanced {...} block from the response.
+      const extracted = extractJSONBlock(repaired);
+      if (extracted !== null) {
+        return extracted as T;
+      }
       throw new Error(`Failed to parse AI response as JSON. Raw response (first 500 chars): ${cleaned.slice(0, 500)}`);
     }
   }
+}
+
+/** Extract the first balanced {...} JSON block from text that may contain prose. */
+function extractJSONBlock(text: string): unknown | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        const candidate = text.slice(start, i + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
 }

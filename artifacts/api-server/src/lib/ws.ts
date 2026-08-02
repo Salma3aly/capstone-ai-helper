@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
+import { verifyToken } from "../routes/auth.js";
 
 let wss: WebSocketServer | null = null;
 const clients = new Map<WebSocket, { name: string | null; email: string | null }>();
@@ -14,7 +15,17 @@ export function setupWebSocket(server: Server) {
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === "identify") {
-          clients.set(ws, { name: msg.name || null, email: msg.email || null });
+          // Prefer JWT-authenticated identity over client-supplied values
+          let name = msg.name || null;
+          let email = msg.email || null;
+          if (msg.token && typeof msg.token === "string") {
+            const decoded = verifyToken(msg.token);
+            if (decoded) {
+              name = decoded.name;
+              email = decoded.email;
+            }
+          }
+          clients.set(ws, { name, email });
           broadcastPresence();
         }
       } catch {}

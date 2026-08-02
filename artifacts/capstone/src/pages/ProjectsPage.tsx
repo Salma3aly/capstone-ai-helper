@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'wouter';
 import { Plus, Trash2, Clock, Wifi, Cpu } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { getProjects, deleteProject } from '@/lib/projects/store';
+import { getProjectsAsync, deleteProject } from '@/lib/projects/store';
 import type { SavedProject } from '@/lib/sandbox/types';
 
 const STATUS_META: Record<SavedProject['status'], { label: string; color: string }> = {
@@ -17,10 +17,14 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  useEffect(() => { setProjects(getProjects()); }, []);
+  useEffect(() => { getProjectsAsync().then(setProjects).catch(() => {}); }, []);
 
   const handleDelete = () => {
-    if (deleteId) { deleteProject(deleteId); setProjects(getProjects()); setDeleteId(null); }
+    if (deleteId) {
+      deleteProject(deleteId);
+      getProjectsAsync().then(setProjects).catch(() => {});
+      setDeleteId(null);
+    }
   };
 
   return (

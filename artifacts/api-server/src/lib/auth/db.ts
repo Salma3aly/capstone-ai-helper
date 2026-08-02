@@ -3,7 +3,10 @@ import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
 
-const DB_PATH = path.join(process.cwd(), "data", "users.json");
+const DB_PATH = path.join(
+  process.env.DATA_DIR || path.join(process.cwd(), "data"),
+  "users.json",
+);
 const JWT_SECRET = process.env.JWT_SECRET || "capstone-secret-key-change-in-production";
 
 export interface User {

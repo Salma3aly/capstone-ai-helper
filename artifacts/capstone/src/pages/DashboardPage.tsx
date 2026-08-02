@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { Sparkles, Cpu, BookOpen, Quote, Users, FolderOpen, ArrowRight, TrendingUp, Clock, Zap } from 'lucide-react';
 import { useAuth } from '@/lib/context/AuthContext';
+import { getProjectsAsync } from '@/lib/projects/store';
 
 interface SandboxProject { id: string; title: string; stage: string; updatedAt: number; }
 interface ResearchSession { id: string; topic: string; createdAt: number; }
@@ -40,10 +41,13 @@ export default function DashboardPage() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   useEffect(() => {
-    try {
-      const sp = JSON.parse(localStorage.getItem('sandbox_projects') || '[]') as SandboxProject[];
-      setSandboxProjects(sp.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3));
-    } catch {}
+    getProjectsAsync()
+      .then((projects) => setSandboxProjects(
+        projects.map((p) => ({ id: p.id, title: p.idea, stage: p.status, updatedAt: p.updatedAt }))
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 3)
+      ))
+      .catch(() => {});
     try {
       const token = localStorage.getItem('capstone_token');
       if (token) {
@@ -58,7 +62,7 @@ export default function DashboardPage() {
   const stats = [
     { label: 'Sandbox Projects', value: sandboxProjects.length, icon: <Cpu className="w-4 h-4" />, color: 'text-[#ec4899]', bg: 'bg-pink-50' },
     { label: 'Research Sessions', value: researchSessions.length, icon: <BookOpen className="w-4 h-4" />, color: 'text-[#a855f7]', bg: 'bg-violet-50' },
-    { label: 'Active Tools', value: 5, icon: <Zap className="w-4 h-4" />, color: 'text-[#3b82f6]', bg: 'bg-blue-50' },
+    { label: 'Active Tools', value: TOOLS.length, icon: <Zap className="w-4 h-4" />, color: 'text-[#3b82f6]', bg: 'bg-blue-50' },
     { label: 'Days Streak', value: 1, icon: <TrendingUp className="w-4 h-4" />, color: 'text-[#10b981]', bg: 'bg-emerald-50' },
   ];
 

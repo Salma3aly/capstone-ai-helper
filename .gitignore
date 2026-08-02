@@ -47,3 +47,26 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Secrets — never commit API keys
+.env
+.env.local
+.env.*.local
+
+# Logs and test artifacts
+*.log
+api-test-*.log
+dev-server-*.log
+test-payloads/
+
+# Next.js build cache (legacy app)
+.next/
+
+# Orphaned legacy Next.js data (not used by the deployed api-server)
+/data/
+artifacts/api-server/data/hub_data.json
+
+# Misc generated files
+analyze_result.json
+next-env.d.ts
+.cursor/
