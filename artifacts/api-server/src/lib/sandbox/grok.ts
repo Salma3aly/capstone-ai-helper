@@ -161,7 +161,7 @@ export async function grokChat(messages: ChatMessage[], model = "llama-3.3-70b-v
     throw new Error(`Grok API error (${res.status}): ${err}`);
   }
 
-  const data = await res.json();
+  const data = (await res.json()) as any;
   const choice = data.choices?.[0];
   const content = choice?.message?.content || "";
   const finishReason = choice?.finish_reason;

@@ -95,10 +95,10 @@ router.get("/research/papers", async (req, res) => {
   } catch (e) { return res.status(500).json({ error: e instanceof Error ? e.message : "Failed" }); }
 });
 
-router.post("/research/paper-chat", async (req, res) => {
+router.post("/research/paper-chat", async (req, res): Promise<void> => {
   try {
     const { messages, context } = req.body;
-    if (!messages) return res.status(400).json({ error: "Messages required" });
+    if (!messages) { res.status(400).json({ error: "Messages required" }); return; }
     const systemContent = context
       ? `You are a research assistant helping a student understand this paper for their capstone project. Paper context:\n\n${context.slice(0, 8000)}`
       : "You are a research assistant helping students understand academic papers for their capstone projects.";
@@ -118,7 +118,7 @@ router.post("/research/paper-chat", async (req, res) => {
     }
     res.end();
   } catch (e) {
-    if (!res.headersSent) return res.status(500).json({ error: e instanceof Error ? e.message : "Failed" });
+    if (!res.headersSent) { res.status(500).json({ error: e instanceof Error ? e.message : "Failed" }); return; }
     res.end();
   }
 });

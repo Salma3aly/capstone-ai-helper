@@ -51,7 +51,7 @@ export async function xaiChat(
     throw new Error(`xAI API error (${res.status}): ${err}`);
   }
 
-  const data = await res.json();
+  const data = (await res.json()) as any;
   const content = data.choices?.[0]?.message?.content || "";
   return content;
 }

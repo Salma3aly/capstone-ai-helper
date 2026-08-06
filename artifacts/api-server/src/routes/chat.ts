@@ -14,10 +14,10 @@ Guidelines:
 4. Use short paragraphs and occasional markdown (bold for key terms). Be warm and supportive.
 5. Adapt complexity to their level — high school, university, or hobbyist.`;
 
-router.post("/chat", async (req, res) => {
+router.post("/chat", async (req, res): Promise<void> => {
   try {
     const { messages, system } = req.body;
-    if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Messages array required" });
+    if (!messages || !Array.isArray(messages)) { res.status(400).json({ error: "Messages array required" }); return; }
 
     const systemContent = system || SYSTEM_PROMPT;
     const grokMessages = [
@@ -45,7 +45,7 @@ router.post("/chat", async (req, res) => {
     res.end();
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Failed to process chat";
-    if (!res.headersSent) return res.status(500).json({ error: msg });
+    if (!res.headersSent) { res.status(500).json({ error: msg }); return; }
     res.end();
   }
 });

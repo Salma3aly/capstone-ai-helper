@@ -44,7 +44,7 @@ async function fetchMetadataByDoi(doi: string): Promise<AcademicMetadata | null>
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
-    const json = await res.json();
+    const json = (await res.json()) as any;
     return formatCrossrefItem(json.message);
   } catch {
     return null;
@@ -58,7 +58,7 @@ async function searchMetadataByTitle(title: string): Promise<AcademicMetadata | 
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
-    const json = await res.json();
+    const json = (await res.json()) as any;
     const items = json.message?.items;
     if (!items || items.length === 0) return null;
     return formatCrossrefItem(items[0]);
@@ -241,7 +241,7 @@ export async function fetchCrossrefPagesByDoi(doi: string): Promise<string> {
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return "";
-    const json = await res.json();
+    const json = (await res.json()) as any;
     return json.message?.page || "";
   } catch {
     return "";

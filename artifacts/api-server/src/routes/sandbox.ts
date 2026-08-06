@@ -57,10 +57,10 @@ router.post("/sandbox/wiring", async (req, res) => {
   } catch (e) { return res.status(500).json({ error: e instanceof Error ? e.message : "Failed" }); }
 });
 
-router.post("/sandbox/generate-code", async (req, res) => {
+router.post("/sandbox/generate-code", async (req, res): Promise<void> => {
   try {
     const { idea, wiring } = req.body;
-    if (!idea) return res.status(400).json({ error: "idea required" });
+    if (!idea) { res.status(400).json({ error: "idea required" }); return; }
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -80,7 +80,7 @@ router.post("/sandbox/generate-code", async (req, res) => {
     }
     res.end();
   } catch (e) {
-    if (!res.headersSent) return res.status(500).json({ error: e instanceof Error ? e.message : "Failed" });
+    if (!res.headersSent) { res.status(500).json({ error: e instanceof Error ? e.message : "Failed" }); return; }
     res.end();
   }
 });
