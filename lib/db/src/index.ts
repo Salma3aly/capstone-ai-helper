@@ -26,4 +26,5 @@ export function getDb() {
 
 export * from "./schema";
 export * from "./hub-store";
+export * from "./user-store";
 export * from "./types";
