@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { readStore, writeStore } from "../lib/storage/db.js";
+import { addChannel, addMessage, getChannels, getMessages } from "@workspace/db";
 import { verifyToken } from "./auth.js";
 import { wssBroadcast } from "../lib/ws.js";
 
@@ -7,7 +7,6 @@ const router = Router();
 
 interface Channel { id: string; name: string; description: string; }
 interface Message { id: string; channelId: string; userId?: string; userName: string; userEmail: string; role: "student" | "mentor"; content: string; timestamp: string; }
-interface HubData { channels: Channel[]; messages: Message[]; }
 
 const DEFAULT_CHANNELS: Channel[] = [
   { id: "general", name: "general", description: "General discussion for all students" },
@@ -16,17 +15,25 @@ const DEFAULT_CHANNELS: Channel[] = [
   { id: "announcements", name: "announcements", description: "Important announcements from mentors" },
 ];
 
-async function getHubData(): Promise<HubData> {
-  try {
-    const data = await readStore<HubData>("hub_data");
-    const hub = data as unknown as HubData;
-    if (!hub.channels || !Array.isArray(hub.channels)) return { channels: DEFAULT_CHANNELS, messages: [] };
-    return hub;
-  } catch { return { channels: DEFAULT_CHANNELS, messages: [] }; }
-}
-
-async function saveHubData(data: HubData) {
-  await writeStore("hub_data", data);
+async function getHubData(): Promise<{ channels: Channel[]; messages: Message[] }> {
+  const [channels, messages] = await Promise.all([getChannels(), getMessages()]);
+  if (channels.length === 0) {
+    for (const c of DEFAULT_CHANNELS) await addChannel(c);
+    return { channels: DEFAULT_CHANNELS, messages: [] };
+  }
+  return {
+    channels,
+    messages: messages.map((m) => ({
+      id: m.id,
+      channelId: m.channelId,
+      userId: m.userId ?? undefined,
+      userName: m.userName,
+      userEmail: m.userEmail,
+      role: m.role as "student" | "mentor",
+      content: m.content,
+      timestamp: m.timestamp.toISOString(),
+    })),
+  };
 }
 
 function getUserFromReq(req: any) {
@@ -51,8 +58,7 @@ router.put("/hub", async (req, res) => {
     const data = await getHubData();
     if (data.channels.some((c) => c.id === clean)) return res.status(409).json({ error: "Channel already exists" });
     const newChannel: Channel = { id: clean, name: clean, description: description || "" };
-    data.channels.push(newChannel);
-    await saveHubData(data);
+    await addChannel(newChannel);
     wssBroadcast(JSON.stringify({ type: "channel_created", channel: newChannel }));
     return res.json(newChannel);
   } catch (e) { return res.status(500).json({ error: "Failed to create channel" }); }
@@ -71,9 +77,16 @@ router.post("/hub", async (req, res) => {
       channelId, userId: user.id, userName: user.name, userEmail: user.email, role,
       content: content.trim(), timestamp: new Date().toISOString(),
     };
-    const data = await getHubData();
-    data.messages.push(newMessage);
-    await saveHubData(data);
+    await addMessage({
+      id: newMessage.id,
+      channelId: newMessage.channelId,
+      userId: newMessage.userId,
+      userName: newMessage.userName,
+      userEmail: newMessage.userEmail,
+      role: newMessage.role,
+      content: newMessage.content,
+      timestamp: new Date(newMessage.timestamp),
+    });
     wssBroadcast(JSON.stringify({ type: "new_message", message: newMessage }));
     return res.json(newMessage);
   } catch (e) { return res.status(500).json({ error: "Failed to post message" }); }
