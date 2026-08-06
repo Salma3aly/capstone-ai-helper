@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { CopyButton } from "@/components/research/CopyButton";
 import { FindPapersGuide } from "@/components/research/FindPapersGuide";
-import { ResearchSummarySkeleton } from "@/components/ui/Skeleton";
+import { ResearchSummarySkeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   getAllResearchPapers,
