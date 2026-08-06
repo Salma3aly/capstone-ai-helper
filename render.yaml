@@ -1,0 +1,14 @@
+# Render Blueprint: deploys the Express + WebSocket API server. See https://render.com/docs/yaml-spec
+services:
+  - type: web
+    name: capstone-ai-helper-api
+    runtime: node
+    plan: free
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
+    startCommand: pnpm --filter @workspace/api-server run start
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 22.11.0
+      # PORT, NODE_ENV are injected automatically by Render.
+      # GROQ_API_KEYS and other secrets must be added in the Render dashboard.
